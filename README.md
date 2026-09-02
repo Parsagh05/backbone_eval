@@ -94,17 +94,43 @@ result = run_evaluation(BackboneEvalConfig(
 ## Kaggle
 
 Create a notebook, paste in `notebooks/kaggle_backbone_eval.ipynb`, attach the
-MVTec AD and VisA datasets, enable a **GPU** and **Internet**, and run it. The
-notebook clones this repository itself:
+MVTec AD and VisA datasets, enable a **GPU**, switch **Internet on**, and run
+it. The notebook fetches this repository itself, so nothing needs uploading and
+re-running the cell is safe.
 
-```python
-git("clone", "--depth", "1", REPO, ROOT)     # or pull --ff-only if already there
-```
+**Internet must be enabled.** Without it, `git clone` receives an intercepted
+response, decides it needs credentials, and reports
+`could not read Username for 'https://github.com'` — which says nothing about
+the real cause. The cell therefore sets `GIT_TERMINAL_PROMPT=0`, and its
+failure message names the Internet setting first.
 
-so nothing needs uploading, re-running the cell is safe, and the commit is
-printed to tie a run to its exact source. Cloning an *empty* repository
-succeeds silently, so the cell checks for `pyproject.toml` and says what
-happened rather than failing later inside pip.
+The fetch degrades in three stages, so an awkward network costs a warning
+rather than the run:
+
+| Situation | Behaviour |
+| --- | --- |
+| no checkout yet | `git clone --depth 1` |
+| clone fails | plain-HTTPS tarball from `codeload.github.com` |
+| checkout present | `git pull --ff-only`; local edits fail loudly |
+| pull fails | warn and use the checkout already on disk |
+
+It prints the short commit when git metadata is available, so a run ties back
+to its exact source. Cloning an *empty* repository also succeeds and leaves
+nothing behind, so the cell checks for `pyproject.toml` rather than failing
+later inside pip.
+
+**Editable installs are invisible to a running kernel.** A PEP 660 editable
+install writes a `.pth` file, and `.pth` files are read only when the
+interpreter starts, so `pip install -e` followed by `import bbeval` in the same
+session raises `ModuleNotFoundError`. The notebook adds `<root>/src` to
+`sys.path` and calls `importlib.invalidate_caches()` instead of asking for a
+kernel restart. The `pip install` still matters — it resolves the dependencies
+declared in `pyproject.toml`.
+
+The same cell prints the loaded backbones and any that are unavailable. Worth
+reading before a long run: a missing optional dependency disables a backbone
+rather than raising, so a silent `clip` failure would otherwise surface only as
+a missing column in the results.
 
 MVTec and VisA are published as separate Kaggle datasets under different
 parents, so both roots are given explicitly rather than discovered under one
