@@ -41,7 +41,8 @@ def test_fingerprint_tracks_settings_that_change_results():
 
 
 def test_fingerprint_ignores_settings_that_do_not_change_results():
-    assert make().fingerprint() == make(num_workers=8, resume=False).fingerprint()
+    assert make().fingerprint() == make(
+        num_workers=8, resume=False, archive_results=False).fingerprint()
 
 
 @pytest.mark.parametrize("overrides", [

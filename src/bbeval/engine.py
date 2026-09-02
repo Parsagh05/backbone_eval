@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import numpy as np
@@ -9,7 +10,7 @@ import torch
 
 from .aggregate import (build_dataset_table, build_robustness_table,
                         collect_category_table, save_tables)
-from .artifacts import (load_ground_truth, save_ground_truth, save_shard,
+from .artifacts import (archive_output, save_ground_truth, save_shard,
                         shard_is_done, write_run_manifest)
 from .backbones import Backbone, backbone_errors, create_backbone
 from .config import BackboneEvalConfig
@@ -151,5 +152,12 @@ def run_evaluation(config: BackboneEvalConfig, verbose: bool = True) -> dict:
     tables = {"category": category_table, "dataset": dataset_table,
               "robustness": build_robustness_table(dataset_table)}
     paths = save_tables(config, tables)
-    return {"config_id": config.fingerprint(), "manifest": manifest,
-            "tables": paths, "n_category_rows": len(category_table)}
+
+    result = {"config_id": config.fingerprint(), "manifest": manifest,
+              "tables": paths, "n_category_rows": len(category_table)}
+    if config.archive_results:
+        result["archive"] = archive_output(config)
+        if verbose:
+            size_mb = os.path.getsize(result["archive"]) / 1e6
+            print(f"wrote {result['archive']}  ({size_mb:.0f} MB)")
+    return result

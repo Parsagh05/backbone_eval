@@ -168,6 +168,25 @@ def test_run_writes_manifest_and_tables(result, config):
     assert result["config_id"] == config.fingerprint()
 
 
+def test_archive_bundles_every_artefact(result, config):
+    """One ZIP to download, written beside output_root rather than inside it."""
+    import zipfile
+
+    archive = result["archive"]
+    assert os.path.isfile(archive)
+    # Inside output_root the archive would try to include itself while writing.
+    assert not os.path.abspath(archive).startswith(
+        os.path.abspath(config.output_root) + os.sep)
+
+    with zipfile.ZipFile(archive) as bundle:
+        names = bundle.namelist()
+    assert any(name.startswith("tables/") and name.endswith(".csv") for name in names)
+    assert any(name.startswith("prompts/") and name.endswith(".pt") for name in names)
+    assert any(name.startswith("artifacts/stub/fixed/") for name in names)
+    assert any(name.startswith("artifacts/_ground_truth/") for name in names)
+    assert any(name.startswith("run_manifest_") for name in names)
+
+
 def test_shards_round_trip_for_every_prompt_mode(result, config):
     for mode in config.prompt_modes:
         shard = load_shard(config, "stub", mode, "mvtec", "widget", "clean", 0)

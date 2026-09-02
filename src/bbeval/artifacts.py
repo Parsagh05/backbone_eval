@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 
 import numpy as np
 
@@ -91,6 +92,19 @@ def shard_is_done(config: BackboneEvalConfig, backbone_name: str, dataset: str,
     return all(os.path.isfile(shard_path(config, backbone_name, mode, dataset,
                                          category, corruption, severity))
                for mode in config.prompt_modes)
+
+
+def archive_output(config: BackboneEvalConfig) -> str:
+    """Collect every artefact into one ZIP, for a single-file download.
+
+    Written *beside* `output_root`, never inside it: an archive being created
+    within its own source tree tries to add itself while still being written.
+    """
+    output_root = os.path.abspath(config.output_root)
+    parent = os.path.dirname(output_root.rstrip(os.sep)) or "."
+    os.makedirs(parent, exist_ok=True)
+    base = os.path.join(parent, f"backbone_eval_{config.fingerprint()}")
+    return shutil.make_archive(base, "zip", root_dir=output_root)
 
 
 def write_run_manifest(config: BackboneEvalConfig, descriptions: dict) -> str:

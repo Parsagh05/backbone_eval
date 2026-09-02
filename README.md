@@ -96,6 +96,58 @@ On Kaggle, run `notebooks/kaggle_backbone_eval.ipynb` or
 Kaggle datasets under different parents, so both roots are given explicitly
 rather than discovered under one directory.
 
+## Output
+
+Everything lands under `output_root`:
+
+```text
+results/
+  run_manifest_<config_id>.json    resolved config + every per-backbone choice
+  artifacts/<backbone>/<mode>/<dataset>/<category>/<corruption>_s<severity>.npz
+  artifacts/_ground_truth/<dataset>/<category>/*.npz
+  prompts/<backbone>_<source>_<loss>_ctx<n>_seed<seed>.pt
+  tables/{category,dataset,robustness}_<config_id>.csv
+```
+
+`run_evaluation` then writes **one ZIP** of all of it, reported as
+`result["archive"]` — placed *beside* `output_root` rather than inside it, since
+an archive created within its own source tree tries to add itself while it is
+still being written. On Kaggle that is
+`/kaggle/working/backbone_eval_<config_id>.zip`, which shows up in the output
+panel as a single file to download. Set `archive_results=False` to skip it.
+
+Expect roughly **200-400 MB** for a clean two-backbone run: the maps dominate,
+at float16 and `map_res` 64 per image per prompt mode. The `.npz` shards are
+already compressed, so the ZIP is a container rather than a further squeeze.
+
+## Runtime
+
+Measured in visual forward passes, which dominate everything else. Per backbone,
+one clean pass over both protocol directions:
+
+| Work | Images |
+| --- | --- |
+| prompt fitting (2 epochs x both source splits) | ~7,800 |
+| evaluation sweep (MVTec 1,725 + VisA 2,162) | ~3,900 |
+
+All three prompt modes come out of one forward pass, so measuring `fixed`,
+`learned` and `decoupled` costs the same as measuring one.
+
+On a **Kaggle T4**, clean-only, both backbones: **about 1.5-2.5 hours**, plus
+10-15 minutes of weight downloads (CLIP ViT-L/14@336 is ~890 MB, SigLIP2
+ViT-L/16-384 ~3.5 GB). Comfortably inside one 12-hour session.
+
+CLIP runs at 518px (37x37 = 1,369 tokens) and is the slower of the two;
+SigLIP2 runs at its native 384px (24x24 = 576 tokens) but currently encodes
+twice per batch — once for the dense layers, once via `encode_image` for the
+global vector — so the two end up roughly comparable. Collapsing that second
+pass is the obvious optimisation and is noted in `siglip2.py`.
+
+**Corruptions do not fit in one session.** Enabling them turns 1 setting per
+category into 34 (11 corruptions x 3 severities + clean), so the evaluation
+sweep grows ~34x, and `imagecorruptions` is itself expensive at 518px. Budget
+several sessions, raise `num_workers`, and lean on `resume=True`.
+
 ## Protocol
 
 Only the **test** splits are read, and the two roles are kept disjoint

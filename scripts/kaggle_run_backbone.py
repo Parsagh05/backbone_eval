@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
 
 # Both datasets are separate Kaggle datasets under different parents, so each
@@ -22,10 +21,10 @@ SIGLIP2_DENSE_READOUT = "map_token"   # "raw" reproduces the published control
 CORRUPTIONS_ENABLED = False           # clean-only for the backbone comparison
 LIMIT = None                          # e.g. 8 for a smoke test
 CATEGORIES = None                     # e.g. {"mvtec": ["hazelnut"], "visa": ["candle"]}
-ARCHIVE = True
 
 
 def build_config() -> dict:
+    """Turn the settings block above into a BackboneEvalConfig payload."""
     payload = {
         "mvtec_root": MVTEC_INPUT,
         "visa_root": VISA_INPUT,
@@ -43,19 +42,13 @@ def build_config() -> dict:
 
 
 def main() -> None:
+    """Run the sweep and print the result, including the ZIP to download."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "src"))
     from bbeval import BackboneEvalConfig, run_evaluation
 
-    config = BackboneEvalConfig(**build_config())
-    result = run_evaluation(config)
+    result = run_evaluation(BackboneEvalConfig(**build_config()))
     print(json.dumps(result, indent=2))
-
-    if ARCHIVE:
-        archive = shutil.make_archive(
-            os.path.join("/kaggle/working", f"backbone_eval_{config.fingerprint()}"),
-            "zip", OUTPUT_ROOT)
-        print(f"wrote {archive}")
 
 
 if __name__ == "__main__":

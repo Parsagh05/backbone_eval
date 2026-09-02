@@ -111,6 +111,9 @@ class BackboneEvalConfig:
     amp: bool = True
     resume: bool = True
     limit: int | None = None
+    # Collect every artefact into one ZIP beside output_root, so a Kaggle run
+    # leaves a single file to download.
+    archive_results: bool = True
     run_metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
