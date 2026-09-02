@@ -1,0 +1,30 @@
+{
+  "mvtec_root": "/kaggle/input/datasets/alirezasalehy/mvtec-ad/mvtec_anomaly_detection",
+  "visa_root": "/kaggle/input/datasets/alirezasalehy/visa-ad/VisA_20220922",
+  "output_root": "/kaggle/working/results",
+  "weights_dir": "/kaggle/working/weights",
+
+  "backbones": ["clip", "siglip2"],
+  "prompt_modes": ["fixed", "learned", "decoupled"],
+
+  "clip_backbone": "ViT-L/14@336px",
+  "siglip2_model": "hf-hub:timm/ViT-L-16-SigLIP2-384",
+  "siglip2_dense_readout": "map_token",
+  "siglip2_input_size": null,
+
+  "input_size": 518,
+  "map_res": 64,
+  "n_ctx": 8,
+  "loss_mode": "local",
+  "epochs": 2,
+  "batch_size": 8,
+
+  "corruptions_enabled": false,
+  "include_clean": true,
+
+  "device": "cuda",
+  "seed": 111,
+  "num_workers": 2,
+  "amp": true,
+  "resume": true
+}

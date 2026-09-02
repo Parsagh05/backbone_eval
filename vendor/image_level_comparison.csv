@@ -1,0 +1,9 @@
+Backbone,Dataset,Method / Setting,AUROC,F1-Max,AP,Opt. Thresh.
+TIPS (L/14 HR),MVTec-AD,Decoupled / Fixed Prompts,93.4,92.9,96.1,0.52
+TIPS (L/14 HR),VisA,Decoupled / Fixed Prompts,87.7,84.8,90.9,0.48
+SigLIP 2,MVTec-AD,Fixed Prompts,88.7,90.1,94.4,0.55
+SigLIP 2,VisA,Fixed Prompts,74.9,78.1,80.5,0.51
+TIPS v2,MVTec-AD,Decoupled / Fixed Prompts,94.8,93.6,97.2,0.5
+TIPS v2,VisA,Decoupled / Fixed Prompts,89.2,86.1,92.4,0.47
+dinov2.txt,MVTec-AD,Text-Image Matching,85.2,82.4,88.9,0.61
+dinov2.txt,VisA,Text-Image Matching,79.6,76.8,81.3,0.58

@@ -1,0 +1,9 @@
+Backbone,Dataset,Image AUROC,Image F1-Max,Image AP,Image Thresh.,Pixel AUROC,Pixel F1-Max,Pixel AUPRO,Pixel Thresh.
+TIPS (L/14 HR),MVTec,93.4,92.9,96.1,0.52,90.9,43.8,84.0,0.35
+TIPS (L/14 HR),VisA,87.7,84.8,90.9,0.48,95.9,31.5,88.2,0.31
+SigLIP 2,MVTec,88.7,90.1,94.4,0.55,61.3,10.3,31.0,0.28
+SigLIP 2,VisA,74.9,78.1,80.5,0.51,56.9,2.2,27.9,0.22
+TIPS v2,MVTec,94.8,93.6,97.2,0.5,92.4,46.2,86.5,0.33
+TIPS v2,VisA,89.2,86.1,92.4,0.47,96.8,34.0,90.1,0.3
+dinov2.txt,MVTec,85.2,82.4,88.9,0.61,93.5,48.1,87.2,0.4
+dinov2.txt,VisA,79.6,76.8,81.3,0.58,94.1,38.6,85.0,0.38

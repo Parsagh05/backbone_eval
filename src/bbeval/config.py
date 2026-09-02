@@ -1,0 +1,193 @@
+"""Validated configuration for one backbone-benchmark invocation.
+
+Every knob that was a notebook-level global lives here, so a run is fully
+described by one JSON file and recorded alongside its artefacts.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+# pptx slide 21: only the test splits are read, and the two roles are disjoint.
+DEFAULT_PROTOCOL = (("mvtec", "visa"), ("visa", "mvtec"))
+
+# pptx slides 18/19.
+DEFAULT_CORRUPTION_GROUPS = {
+    "noise": ("gaussian_noise", "shot_noise", "impulse_noise"),
+    "blur": ("defocus_blur", "motion_blur", "zoom_blur"),
+    "photometric": ("brightness", "contrast"),
+    "geometric": ("rotation", "zoom_scale", "shift"),
+}
+DEFAULT_GEOMETRIC_MAGNITUDES = {
+    "rotation": (5.0, 10.0, 15.0, 20.0),
+    "zoom_scale": (1.05, 1.10, 1.15, 1.20),
+    "shift": (0.02, 0.04, 0.06, 0.08),
+}
+DEFAULT_DENSE_LAYER_FRACTIONS = {
+    "clip": (0.25, 0.5, 0.75, 1.0),
+    "siglip2": (1.0,),
+}
+VALID_PROMPT_MODES = ("fixed", "learned", "decoupled")
+
+
+@dataclass
+class BackboneEvalConfig:
+    # --- paths ---------------------------------------------------------------
+    mvtec_root: str
+    visa_root: str
+    output_root: str
+    weights_dir: str | None = None
+
+    # --- what to run ---------------------------------------------------------
+    backbones: tuple[str, ...] = ("clip", "siglip2")
+    protocol: tuple[tuple[str, str], ...] = DEFAULT_PROTOCOL
+    categories: dict[str, tuple[str, ...]] | None = None
+    prompt_modes: tuple[str, ...] = ("fixed", "learned", "decoupled")
+
+    # --- backbone selection --------------------------------------------------
+    clip_backbone: str = "ViT-L/14@336px"
+    siglip2_model: str = "hf-hub:timm/ViT-L-16-SigLIP2-384"
+    # "map_token" pools each patch through SigLIP2's own attention-pooling head,
+    # the function that defines its joint image-text space. "raw" leaves trunk
+    # tokens unprojected -- the CLIP-shaped assumption, kept as the control that
+    # reproduces the published chance-level localisation.
+    siglip2_dense_readout: str = "map_token"
+    # None -> the checkpoint's native resolution (SigLIP2 is resolution-specific).
+    siglip2_input_size: int | None = None
+
+    # --- visual / scoring ----------------------------------------------------
+    input_size: int = 518
+    map_res: int = 64
+    dense_layer_fractions: dict[str, tuple[float, ...]] = field(
+        default_factory=lambda: dict(DEFAULT_DENSE_LAYER_FRACTIONS))
+    shared_dense_layers: tuple[float, ...] | None = None
+    use_value_attention: bool = True
+    global_token: str = "spatial"
+    add_local_evidence: bool = True
+    gaussian_sigma: float = 1.0
+    topk_fraction: float = 0.0
+
+    # --- prompts -------------------------------------------------------------
+    n_ctx: int = 8
+    learnable_suffix: dict[str, str] = field(
+        default_factory=lambda: {"normal": "object", "anomalous": "damaged object"})
+    # None -> use the real category name, which is available zero-shot.
+    fixed_prompt_class_name: str | None = None
+
+    # --- prompt fitting ------------------------------------------------------
+    loss_mode: str = "local"
+    focal_gamma: float = 2.0
+    image_loss_weight: float = 1.0
+    pixel_loss_weight: float = 1.0
+    epochs: int = 2
+    batch_size: int = 8
+    learning_rate: float = 1e-3
+    adam_betas: tuple[float, float] = (0.5, 0.999)
+    weight_decay: float = 0.0
+    grad_clip: float = 1.0
+    max_train_images_per_category: int | None = None
+
+    # --- corruptions (pptx slides 18/19/21) ----------------------------------
+    corruption_groups: dict[str, tuple[str, ...]] = field(
+        default_factory=lambda: dict(DEFAULT_CORRUPTION_GROUPS))
+    geometric_magnitudes: dict[str, tuple[float, ...]] = field(
+        default_factory=lambda: dict(DEFAULT_GEOMETRIC_MAGNITUDES))
+    severities: tuple[int, ...] = (1, 2, 3)
+    include_clean: bool = True
+    corruptions_enabled: bool = True
+
+    # --- metrics -------------------------------------------------------------
+    aupro_fpr_limit: float = 0.30
+    aupro_thresholds: int = 200
+    ece_bins: int = 15
+
+    # --- runtime -------------------------------------------------------------
+    device: str = "cuda"
+    seed: int = 111
+    num_workers: int = 0
+    amp: bool = True
+    resume: bool = True
+    limit: int | None = None
+    run_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.backbones = tuple(self.backbones)
+        self.protocol = tuple(tuple(pair) for pair in self.protocol)
+        self.prompt_modes = tuple(self.prompt_modes)
+        self.severities = tuple(int(value) for value in self.severities)
+        self.adam_betas = tuple(float(value) for value in self.adam_betas)
+        self.corruption_groups = {
+            key: tuple(value) for key, value in self.corruption_groups.items()}
+        self.geometric_magnitudes = {
+            key: tuple(value) for key, value in self.geometric_magnitudes.items()}
+        self.dense_layer_fractions = {
+            key: tuple(value) for key, value in self.dense_layer_fractions.items()}
+        if self.shared_dense_layers is not None:
+            self.shared_dense_layers = tuple(self.shared_dense_layers)
+        if self.categories is not None:
+            self.categories = {
+                key: tuple(value) for key, value in self.categories.items()}
+
+        if self.loss_mode not in ("local", "global", "both"):
+            raise ValueError(
+                f"loss_mode must be local, global or both; got {self.loss_mode!r}")
+        if self.siglip2_dense_readout not in ("map_token", "raw"):
+            raise ValueError(
+                "siglip2_dense_readout must be map_token or raw; got "
+                f"{self.siglip2_dense_readout!r}")
+        unknown = set(self.prompt_modes) - set(VALID_PROMPT_MODES)
+        if unknown:
+            raise ValueError(f"unknown prompt mode(s): {sorted(unknown)}")
+        # pptx slide 23 asks for both fixed and learnable prompt performance.
+        if not {"fixed", "learned"} <= set(self.prompt_modes):
+            raise ValueError("prompt_modes must include both fixed and learned")
+        if self.input_size <= 0 or self.map_res <= 0:
+            raise ValueError("input_size and map_res must be positive")
+        if self.n_ctx <= 0:
+            raise ValueError("n_ctx must be positive")
+
+    # --- derived -------------------------------------------------------------
+    @property
+    def dataset_roots(self) -> dict[str, str]:
+        return {"mvtec": self.mvtec_root, "visa": self.visa_root}
+
+    @property
+    def artifact_dir(self) -> str:
+        return f"{self.output_root}/artifacts"
+
+    @property
+    def checkpoint_dir(self) -> str:
+        return f"{self.output_root}/prompts"
+
+    @property
+    def table_dir(self) -> str:
+        return f"{self.output_root}/tables"
+
+    def fingerprint(self) -> str:
+        """Identifies the settings a stored artefact was produced under."""
+        payload = {
+            "seed": self.seed,
+            "input": self.input_size,
+            "map_res": self.map_res,
+            "backbones": list(self.backbones),
+            "clip": self.clip_backbone,
+            "siglip2": self.siglip2_model,
+            "siglip2_readout": self.siglip2_dense_readout,
+            "siglip2_input": self.siglip2_input_size,
+            "layers": (self.dense_layer_fractions if self.shared_dense_layers is None
+                       else {"shared": self.shared_dense_layers}),
+            "value_attention": self.use_value_attention,
+            "n_ctx": self.n_ctx,
+            "loss": self.loss_mode,
+            "global_token": self.global_token,
+            "local_evidence": self.add_local_evidence,
+            "sigma": self.gaussian_sigma,
+        }
+        blob = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.blake2b(blob.encode(), digest_size=6).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

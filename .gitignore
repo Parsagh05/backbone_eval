@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Run outputs and downloaded weights are reproducible, not source.
+results/
+artifacts/
+weights/
+*.npz
+*.pt

@@ -1,0 +1,168 @@
+"""OpenAI CLIP backbone -- the reference against which other backbones are read.
+
+CLIP's joint image-text space is `visual.proj @ ln_post(token)`: one linear map
+applied identically to every token. That is why patch tokens can be compared to
+text embeddings for free, and it is the assumption the rest of this literature
+inherits. Backbones that pool differently must supply their own equivalent.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
+
+import torch
+import torch.nn.functional as F
+
+from ..config import BackboneEvalConfig
+from .base import Backbone, register_backbone, resolve_dense_layers, skip_backbone
+
+try:
+    import clip
+except Exception as _clip_error:  # noqa: BLE001
+    clip = None
+    skip_backbone("clip", _clip_error)
+
+CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
+CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
+
+
+def _value_block(block, x: torch.Tensor) -> torch.Tensor:
+    """One CLIP residual block with attention replaced by its value path."""
+    normed = block.ln_1(x)
+    qkv = F.linear(normed, block.attn.in_proj_weight, block.attn.in_proj_bias)
+    x = x + block.attn.out_proj(qkv.chunk(3, dim=-1)[2])
+    return x + block.mlp(block.ln_2(x))
+
+
+class ClipBackbone(Backbone):
+    name = "clip"
+    has_two_global_tokens = False
+
+    def __init__(self, config: BackboneEvalConfig) -> None:
+        if clip is None:
+            raise ImportError("the openai/CLIP package is required for the clip backbone")
+        self.config = config
+        self.device = config.device
+        model, _ = clip.load(config.clip_backbone, device=self.device, jit=False,
+                             download_root=config.weights_dir or None)
+        self.model = model.float().eval()
+        for parameter in self.model.parameters():
+            parameter.requires_grad_(False)
+
+        self.visual = self.model.visual
+        self.patch_size = self.visual.conv1.kernel_size[0]
+        self.image_size = config.input_size
+        self.grid = self.image_size // self.patch_size
+        self.embed_dim = self.model.text_projection.shape[1]
+        self.depth = len(self.visual.transformer.resblocks)
+        self.layers = resolve_dense_layers(config, self.name, self.depth)
+        self.temperature = float(1.0 / self.model.logit_scale.exp().item())
+        self.num_params = sum(p.numel() for p in self.model.parameters())
+
+        self._pos_embed = self._interpolated_pos_embed()
+        self._mean = torch.tensor(CLIP_MEAN, device=self.device).view(1, 3, 1, 1)
+        self._std = torch.tensor(CLIP_STD, device=self.device).view(1, 3, 1, 1)
+
+    def _interpolated_pos_embed(self) -> torch.Tensor:
+        """Resize the visual positional embedding to the configured input size."""
+        pos = self.visual.positional_embedding.detach()
+        class_pos, patch_pos = pos[:1], pos[1:]
+        native = int(round(patch_pos.shape[0] ** 0.5))
+        if native == self.grid:
+            return pos
+        patch_pos = patch_pos.reshape(1, native, native, -1).permute(0, 3, 1, 2)
+        patch_pos = F.interpolate(patch_pos, size=(self.grid, self.grid),
+                                  mode="bicubic", align_corners=False)
+        patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(self.grid ** 2, -1)
+        return torch.cat([class_pos, patch_pos], dim=0)
+
+    def describe(self) -> dict[str, Any]:
+        return {**super().describe(),
+                "model_id": self.config.clip_backbone,
+                "dense_readout": "ln_post_proj",
+                "value_attention": self.config.use_value_attention}
+
+    # --- vision --------------------------------------------------------------
+    def preprocess(self, images_uint8: torch.Tensor) -> torch.Tensor:
+        x = images_uint8.to(self.device, non_blocking=True).float().div_(255.0)
+        if x.shape[-1] != self.image_size:
+            x = F.interpolate(x, size=(self.image_size, self.image_size),
+                              mode="bicubic", align_corners=False, antialias=True)
+        return (x.clamp_(0.0, 1.0) - self._mean) / self._std
+
+    def _project(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Into the joint image-text space, where the prompt embeddings live."""
+        return self.visual.ln_post(tokens) @ self.visual.proj
+
+    def encode(self, x: torch.Tensor) -> dict[str, Any]:
+        visual = self.visual
+        grid = x.shape[-1] // self.patch_size
+        value_layer = max(self.layers)
+
+        tokens = visual.conv1(x)
+        tokens = tokens.reshape(tokens.shape[0], tokens.shape[1], -1).permute(0, 2, 1)
+        class_token = (visual.class_embedding.to(tokens.dtype)
+                       .view(1, 1, -1).expand(tokens.shape[0], 1, -1))
+        tokens = torch.cat([class_token, tokens], dim=1) + self._pos_embed
+        hidden = visual.ln_pre(tokens).permute(1, 0, 2)      # NLD -> LND
+
+        pre_value, dense = None, {}
+        for depth, block in enumerate(visual.transformer.resblocks, start=1):
+            if depth == value_layer:
+                pre_value = hidden
+            hidden = block(hidden)
+            if depth in self.layers:
+                dense[depth] = self._project(hidden.permute(1, 0, 2)[:, 1:])
+        global_embedding = self._project(hidden.permute(1, 0, 2)[:, :1])[:, 0]
+
+        if self.config.use_value_attention and pre_value is not None:
+            patched = _value_block(visual.transformer.resblocks[value_layer - 1],
+                                   pre_value)
+            dense[value_layer] = self._project(patched.permute(1, 0, 2)[:, 1:])
+
+        return {
+            "object": global_embedding,
+            "spatial": global_embedding,          # CLIP has a single global token
+            "dense": {layer: value.reshape(value.shape[0], grid, grid, -1)
+                      for layer, value in dense.items()},
+        }
+
+    # --- text ----------------------------------------------------------------
+    def init_prompt(self, suffixes: Sequence[str]) -> tuple[torch.Tensor, dict]:
+        """[SOT][V1..Vn][suffix][EOT], with only the V tokens trainable."""
+        n_ctx = self.config.n_ctx
+        texts = [f"{'X ' * n_ctx}{suffix}" for suffix in suffixes]
+        tokenized = clip.tokenize(texts).to(self.device)
+        with torch.no_grad():
+            embeds = self.model.token_embedding(tokenized)
+        seed_source = embeds[:, 1:1 + n_ctx]
+        ctx = seed_source + 0.02 * torch.randn_like(seed_source)
+        aux = {
+            "prefix": embeds[:, :1].clone(),               # start-of-text
+            "tail": embeds[:, 1 + n_ctx:].clone(),         # suffix, EOT, padding
+            "eot_index": tokenized.argmax(dim=-1),
+        }
+        return ctx, aux
+
+    def _forward_text(self, embeds: torch.Tensor, eot_index: torch.Tensor) -> torch.Tensor:
+        model = self.model
+        x = embeds + model.positional_embedding
+        x = model.transformer(x.permute(1, 0, 2)).permute(1, 0, 2)
+        x = model.ln_final(x)
+        pooled = x[torch.arange(x.shape[0], device=x.device), eot_index]
+        return pooled @ model.text_projection
+
+    def encode_text(self, ctx: torch.Tensor, aux: dict) -> torch.Tensor:
+        embeds = torch.cat([aux["prefix"], ctx, aux["tail"]], dim=1)
+        return self._forward_text(embeds, aux["eot_index"])
+
+    @torch.no_grad()
+    def encode_fixed_text(self, texts: Sequence[str]) -> torch.Tensor:
+        tokenized = clip.tokenize(list(texts)).to(self.device)
+        return self._forward_text(self.model.token_embedding(tokenized),
+                                  tokenized.argmax(dim=-1))
+
+
+if clip is not None:
+    register_backbone("clip")(ClipBackbone)

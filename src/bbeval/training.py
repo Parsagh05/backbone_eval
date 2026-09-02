@@ -1,0 +1,95 @@
+"""Fitting the prompt context on a source dataset's test split."""
+
+from __future__ import annotations
+
+import os
+import time
+
+import torch
+
+from .backbones import Backbone
+from .config import BackboneEvalConfig
+from .datasets import make_train_loader
+from .determinism import derived_seed, seed_everything
+from .losses import prompt_loss
+from .prompts import LearnablePrompts
+from .scoring import training_logits
+
+
+def checkpoint_path(config: BackboneEvalConfig, backbone_name: str, source: str) -> str:
+    os.makedirs(config.checkpoint_dir, exist_ok=True)
+    return os.path.join(
+        config.checkpoint_dir,
+        f"{backbone_name}_{source}_{config.loss_mode}_ctx{config.n_ctx}"
+        f"_seed{config.seed}.pt")
+
+
+def assert_prompt_learning_only(config: BackboneEvalConfig, backbone: Backbone,
+                                prompts: LearnablePrompts) -> list[torch.nn.Parameter]:
+    """Protocol constraint: encoders frozen; only prompt context vectors train."""
+    for attribute in ("model", "visual", "image_model", "text_model"):
+        module = getattr(backbone, attribute, None)
+        if not isinstance(module, torch.nn.Module):
+            continue
+        for parameter in module.parameters():
+            if parameter.requires_grad:
+                raise AssertionError(
+                    f"protocol violated: {attribute} has trainable encoder "
+                    "parameters (prompt learning only)")
+    trainable = [p for p in prompts.parameters() if p.requires_grad]
+    expected = 2 * config.n_ctx * backbone.embed_dim
+    if len(trainable) != 1 or trainable[0].numel() != expected:
+        raise AssertionError(
+            f"expected exactly one trainable tensor of {expected} elements, got "
+            f"{[p.numel() for p in trainable]}")
+    return trainable
+
+
+def train_prompts(config: BackboneEvalConfig, backbone: Backbone, source: str,
+                  verbose: bool = True) -> LearnablePrompts:
+    """Fit the context vectors on `source`. Resumes from a checkpoint if present."""
+    path = checkpoint_path(config, backbone.name, source)
+    prompts = LearnablePrompts(config, backbone).to(config.device)
+    trainable = assert_prompt_learning_only(config, backbone, prompts)
+
+    if config.resume and os.path.isfile(path):
+        prompts.load_state_dict(torch.load(path, map_location=config.device))
+        if verbose:
+            print(f"  [{backbone.name}/{source}] loaded {os.path.basename(path)}")
+        return prompts.eval()
+
+    seed_everything(derived_seed(config.seed, "train", backbone.name, source))
+    loader = make_train_loader(config, source)
+    optimizer = torch.optim.Adam(trainable, lr=config.learning_rate,
+                                 betas=config.adam_betas,
+                                 weight_decay=config.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=max(1, config.epochs * len(loader)))
+
+    if verbose:
+        print(f"  [{backbone.name}/{source}] fitting {trainable[0].numel():,} prompt "
+              f"parameters on {len(loader.dataset)} images "
+              f"({config.epochs} epochs, {config.loss_mode} loss)")
+    prompts.train()
+    for epoch in range(config.epochs):
+        started, running, seen = time.time(), 0.0, 0
+        for batch in loader:
+            image_logits, pixel_logits = training_logits(
+                config, backbone, prompts, batch["image"])
+            loss = prompt_loss(config, image_logits, pixel_logits,
+                               batch["label"].to(config.device),
+                               batch["mask"].to(config.device))
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(trainable, config.grad_clip)
+            optimizer.step()
+            scheduler.step()
+            running += loss.item() * batch["label"].shape[0]
+            seen += batch["label"].shape[0]
+        if verbose:
+            print(f"    epoch {epoch + 1}/{config.epochs}  "
+                  f"loss {running / max(seen, 1):.4f}  ({time.time() - started:.0f}s)")
+
+    prompts.eval()
+    torch.save(prompts.state_dict(), path)
+    return prompts
