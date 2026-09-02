@@ -91,10 +91,24 @@ result = run_evaluation(BackboneEvalConfig(
 ))
 ```
 
-On Kaggle, run `notebooks/kaggle_backbone_eval.ipynb` or
-`scripts/kaggle_run_backbone.py`. MVTec and VisA are published as separate
-Kaggle datasets under different parents, so both roots are given explicitly
-rather than discovered under one directory.
+## Kaggle
+
+Create a notebook, paste in `notebooks/kaggle_backbone_eval.ipynb`, attach the
+MVTec AD and VisA datasets, enable a **GPU** and **Internet**, and run it. The
+notebook clones this repository itself:
+
+```python
+git("clone", "--depth", "1", REPO, ROOT)     # or pull --ff-only if already there
+```
+
+so nothing needs uploading, re-running the cell is safe, and the commit is
+printed to tie a run to its exact source. Cloning an *empty* repository
+succeeds silently, so the cell checks for `pyproject.toml` and says what
+happened rather than failing later inside pip.
+
+MVTec and VisA are published as separate Kaggle datasets under different
+parents, so both roots are given explicitly rather than discovered under one
+directory.
 
 ## Output
 
