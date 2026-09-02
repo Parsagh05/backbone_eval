@@ -198,6 +198,29 @@ def test_shards_round_trip_for_every_prompt_mode(result, config):
         assert shard["meta"]["config_id"] == config.fingerprint()
 
 
+def test_run_shard_without_saving_returns_named_arrays(config):
+    """The exact shape the notebook's smoke cell consumes.
+
+    `anomaly_outputs` yields (scores, maps) tuples but `run_shard` yields dicts
+    that also carry labels; conflating the two is an easy mistake to make.
+    """
+    from bbeval.engine import load_backbones, run_shard
+    from bbeval.prompts import build_fixed_text
+
+    backbone = load_backbones(config)["stub"]
+    text = build_fixed_text(config, backbone, "widget")
+    outputs, masks = run_shard(config, backbone, {"fixed": text}, "mvtec",
+                               "widget", "clean", 0, save=False)
+
+    # Only "fixed" text was supplied, so the learned-prompt modes are skipped.
+    assert set(outputs) == {"fixed"}
+    shard = outputs["fixed"]
+    assert set(shard) == {"scores", "maps", "labels"}
+    assert shard["scores"].shape == (N_NORMAL + N_DEFECT,)
+    assert shard["maps"].shape == (N_NORMAL + N_DEFECT, config.map_res, config.map_res)
+    assert masks.shape == shard["maps"].shape
+
+
 def test_metrics_are_finite_and_in_range(result, config):
     table = collect_category_table(config, verbose=False)
     assert not table.empty
