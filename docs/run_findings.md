@@ -1,8 +1,17 @@
-# First measured run — findings
+# Run findings
 
-Run `1f2fb45b459e`, seed 111, clean only, both protocol directions, MVTec + VisA.
-These are the first *measured* numbers in this track; the CSVs in `vendor/` were
-transcribed from Tipsomaly (see [provenance_note.md](provenance_note.md)).
+| Run | Version | What it was |
+| --- | --- | --- |
+| `1f2fb45b459e` | 0.1.0 | first measured run; three defects found in it |
+| `cae0b9678540` | 0.5.0 | after the fixes, full AnomalyCLIP parity |
+
+---
+
+# Run `1f2fb45b459e` — the first measured run
+
+Seed 111, clean only, both protocol directions, MVTec + VisA. These were the
+first *measured* numbers in this track; the CSVs in `vendor/` were transcribed
+from Tipsomaly (see [provenance_note.md](provenance_note.md)).
 
 ## 1. SigLIP2 localisation is not at chance — the published failure was a readout bug
 
@@ -134,3 +143,84 @@ top of. Fixed in 0.2.0:
 
 Delete nothing: the previous run stays valid under its own id, and remains the
 "raw readout / 2 epochs" control.
+
+
+---
+
+# Run `cae0b9678540` — after the fixes
+
+Same protocol, seed 111, clean only. Version 0.5.0: `loss_mode="both"`,
+15 epochs, `n_ctx=12`, `lam=4`, `map_temperature=0.07`, `init_std=0.02`,
+value path on every CLIP dense layer.
+
+## The collapse is gone
+
+| | `1f2fb45b459e` | `cae0b9678540` |
+| --- | --- | --- |
+| CLIP learned, MVTec pixel AUROC | **50.0** (constant map) | **87.7** |
+| CLIP learned, MVTec AUPRO | 14.8 | **76.2** |
+| CLIP learned, VisA AUPRO | 76.9 | **91.6** |
+| SigLIP2 learned, MVTec pixel AUROC | 71.2 | **84.4** |
+| SigLIP2 learned, VisA pixel AUROC | 62.8 | **88.4** |
+| SigLIP2 learned, VisA AUPRO | 40.0 | **80.7** |
+
+Sanity against AnomalyCLIP, which this setting deliberately under-powers by
+removing DPAM, deep prompts and adapters:
+
+| Direction | AnomalyCLIP | Here (CLIP, learned) |
+| --- | --- | --- |
+| MVTec → VisA | 95.5 pixel AUROC | 95.0 |
+| VisA → MVTec | 91.1 pixel AUROC | 87.7 |
+
+Landing just under it while training only 12 context vectors is the expected
+shape of the result.
+
+## Dataset level
+
+Pixel AUROC / AUPRO, then image AUROC:
+
+| | MVTec fixed | MVTec learned | VisA fixed | VisA learned |
+| --- | --- | --- | --- | --- |
+| CLIP | 53.0 / 15.2 — 86.8 | 87.7 / 76.2 — 77.4 | 59.1 / 16.1 — 76.7 | 95.0 / 91.6 — 84.8 |
+| SigLIP2 | **82.8 / 74.2** — **92.7** | 84.4 / 73.5 — **93.6** | **80.2 / 69.4** — **84.0** | 88.4 / 80.7 — 84.4 |
+
+`decoupled` shares the learned map by construction, so its pixel columns equal
+`learned` and only its image score differs. Seeing that identity holds is a
+check that the wiring is right.
+
+## The finding
+
+**Untrained, SigLIP2 localises and CLIP does not** — 82.8 / 80.2 against
+53.0 / 59.1. CLIP's fixed maps span [0.21, 0.50], never crossing 0.5 and barely
+varying; SigLIP2's span [0.15, 0.75]. This is not a CLIP bug: raw patch-text
+similarity with handwritten prompts is known to be weak, which is why WinCLIP
+needs windowing and AnomalyCLIP needs training. SigLIP2's attention-pooled
+readout gets there with neither.
+
+**Trained, CLIP overtakes it** at pixel level (87.7 / 95.0 against 84.4 / 88.4),
+while SigLIP2 keeps the image level nearly everywhere. That trade-off —
+strong without adaptation, overtaken with it — is the counter-trend the deck
+asks for on slide 9.
+
+## Two things to know when reading the table
+
+**1. CLIP's VisA → MVTec maps live at ~5e-5**, in all 15 categories. The ranking
+metrics are unaffected and were checked directly: **0 % zeros, 542–1126 distinct
+values per category**, well clear of float16's smallest subnormal (5.96e-8). So
+87.7 is real signal.
+
+But the image score is `global_prob + max(map)`, and at `max(map) ≈ 1e-4` the
+local-evidence term contributes nothing. That is why CLIP's learned image AUROC
+on MVTec is 77.4 against 86.8 for fixed, and why `decoupled` (86.9) is CLIP's
+best mode there.
+
+The prompts themselves are healthy — `cos(normal, abnormal)` is −0.024, +0.004,
+−0.032, −0.074 across the four checkpoints, with comparable norms. This is a
+CLIP-specific domain-transfer effect, not degenerate training: SigLIP2's
+VisA → MVTec maps peak at 0.82.
+
+**2. Pixel metrics are computed at `map_res = 64`, not the full 518.** Our VisA
+AUPRO (91.6) exceeds AnomalyCLIP's published 87.0 despite a lower AUROC, which
+is consistent with coarser maps and coarser ground-truth regions being more
+forgiving. Do not place these numbers in a table beside published ones without
+saying so, or re-score at full resolution.

@@ -50,6 +50,46 @@ Every adapted value comes from the model's own config or paper — never from
 tuning — and each is written into `run_manifest_<config_id>.json` next to the
 results, so a reader can audit the choices.
 
+## ⚠ Open decision — read before quoting any CLIP number
+
+**CLIP's dense features get an attention-surgery fix. SigLIP2 does not. This has
+not been signed off, and it changes the headline comparison.**
+
+To draw a heatmap, every patch has to be comparable against text. CLIP has a
+documented defect here: read the obvious way, its heatmap points at the *wrong*
+places — below chance. The standard remedy, used by CLIP-Surgery and by
+AnomalyCLIP's DPAM, is to read each block through its value path instead. It
+adds no parameters and changes no weights. `use_value_attention=True` applies it
+to every CLIP dense layer.
+
+SigLIP2 needs nothing equivalent: its attention-pooling head produces usable
+patch features directly.
+
+The tension is that the protocol this track inherited states *"no attention
+layer is modified"*, and this modifies one — for one backbone only.
+
+| | Keep the fix (current) | Drop it |
+| --- | --- | --- |
+| CLIP fixed-prompt pixel AUROC | 53.0 MVTec | ~37, below chance |
+| Comparison means | CLIP measured near its real capability | SigLIP2 beats a broken baseline; worthless |
+| Protocol rule | needs rewording to "no *trainable* internal parameters" | literally true |
+
+**Recommendation:** keep it, and reword the rule to what is actually true —
+*no trainable internal parameters; each backbone gets the readout its own
+architecture requires*, which is the same principle the rest of this repository
+rests on. Then report that **CLIP needs the fix and SigLIP2 does not** as part
+of the result, because that asymmetry is itself a finding about the backbones.
+
+**Two things outstanding:**
+
+1. Run the ablation — CLIP only, `use_value_attention=False`, ~1.5 h. It is in
+   the config fingerprint so it will not collide. That turns "the fix is
+   harmless" from an assertion into a measured number, and pre-empts the
+   reviewer question about whether the baseline was crippled.
+2. **Ask Alireza.** He wrote the "not contaminating the target model's
+   architecture" line, so the call is his — but he should know that following it
+   literally puts CLIP below chance.
+
 ## The variable under test
 
 `siglip2_dense_readout` selects how a patch token reaches the joint space:
@@ -193,7 +233,7 @@ a session:
 
 Epochs was 2 through run `1f2fb45b459e`, which was not enough: the prompts
 collapsed onto "normal everywhere" and pixel AUROC came out at exactly 50.0.
-See [docs/first_run_findings.md](docs/first_run_findings.md). Training now
+See [docs/run_findings.md](docs/run_findings.md). Training now
 reports the abnormal channel's mean and peak each epoch and warns when it never
 rises above `COLLAPSE_PEAK`, so this is visible while it happens.
 
@@ -253,7 +293,7 @@ Audited line by line against AnomalyCLIP's own `train.py`, `loss.py` and
 `"local"` drops the image term (Tipsomaly's localisation-only ablation) and
 `"global"` keeps only it. `"local"` was the default through run
 `1f2fb45b459e` and left nothing opposing a collapse onto "normal everywhere";
-see [docs/first_run_findings.md](docs/first_run_findings.md).
+see [docs/run_findings.md](docs/run_findings.md).
 
 Seed 111. Metrics: pixel AUROC / F1-max / AUPRO / threshold, image AUROC /
 F1-max / AP / threshold, plus ECE for the slide-24 calibration track.
@@ -314,18 +354,23 @@ operates on stored artefacts and can be written against the tables.
 ## Results so far
 
 The first measured run is written up in
-[docs/first_run_findings.md](docs/first_run_findings.md). In short:
+[docs/run_findings.md](docs/run_findings.md). In short:
 
-- **SigLIP2 localisation is not at chance.** Fixed-prompt pixel AUROC of 82.1
-  (MVTec) and 78.9 (VisA) against the 47.3 / 47.0 reported in Tipsomaly Table 9,
-  with AUPRO 74.1 / 68.0 against 0.1 / 0.0, and **no category below chance**.
-  The published failure was the readout, not the backbone.
-- **The CLIP baseline was broken** — below chance in 14 of 27 categories,
-  because the value-path surgery reached only the last of four layers read.
-  Fixed in 0.2.0.
-- **Learned prompts collapsed** onto a constant map at 2 epochs. Now 15, with a
-  warning when the abnormal channel never lifts off zero.
+Two runs are recorded in [docs/run_findings.md](docs/run_findings.md).
+The current one is `cae0b9678540` (v0.5.0, full AnomalyCLIP parity):
 
-The comparison needs re-running under 0.2.0 before it is quotable. The CSVs in
-`vendor/` remain transcriptions, not measurements — see
+- **SigLIP2 localises without any training.** Fixed-prompt pixel AUROC 82.8
+  (MVTec) and 80.2 (VisA), against 47.3 / 47.0 reported in Tipsomaly Table 9 —
+  and against **53.0 / 59.1 for CLIP** under the same prompts. The published
+  failure was the readout, not the backbone.
+- **Trained, CLIP overtakes it at pixel level** (87.7 / 95.0 against
+  84.4 / 88.4) while SigLIP2 keeps the image level. Strong without adaptation,
+  overtaken with it — the counter-trend slide 9 asks for.
+- **Sanity:** CLIP learned reaches 95.0 pixel AUROC on VisA against
+  AnomalyCLIP's published 95.5, while training only 12 context vectors and
+  none of its internal adaptation.
+
+Caveat: pixel metrics are computed at `map_res = 64`, not the full 518, so they
+are not directly comparable to published numbers. The CSVs in `vendor/` remain
+transcriptions, not measurements — see
 [docs/provenance_note.md](docs/provenance_note.md).
