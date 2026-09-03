@@ -165,17 +165,20 @@ already compressed, so the ZIP is a container rather than a further squeeze.
 Measured in visual forward passes, which dominate everything else. Per backbone,
 one clean pass over both protocol directions:
 
-| Work | Images |
+| Work | Forward passes per backbone |
 | --- | --- |
-| prompt fitting (2 epochs x both source splits) | ~7,800 |
+| prompt fitting (15 epochs x both source splits) | ~58,300 |
 | evaluation sweep (MVTec 1,725 + VisA 2,162) | ~3,900 |
 
 All three prompt modes come out of one forward pass, so measuring `fixed`,
 `learned` and `decoupled` costs the same as measuring one.
 
-On a **Kaggle T4**, clean-only, both backbones: **roughly 8-13 hours** at the
-default 15 epochs, plus 10-15 minutes of weight downloads (CLIP ViT-L/14@336 is
-~890 MB, SigLIP2 ViT-L/16-384 ~3.5 GB).
+Calibrated against a measured run: **40 minutes** on a Kaggle T4 for both
+backbones at 2 epochs, of which roughly 5-7 was fixed cost (4.4 GB of weight
+downloads, then the AUPRO pass over 162 category x mode cells). Fifteen epochs
+is 5.3x the compute, so:
+
+**About 3 hours on a T4 — call it 2.5 to 3.5**, comfortably inside one session.
 
 Prompt fitting dominates: at 15 epochs it is about 58,000 forward passes per
 backbone against 3,900 for the evaluation sweep. Two levers if that does not fit
