@@ -14,7 +14,7 @@
 
   "input_size": 518,
   "map_res": 64,
-  "n_ctx": 8,
+  "n_ctx": 12,
   "loss_mode": "both",
   "epochs": 15,
   "batch_size": 8,

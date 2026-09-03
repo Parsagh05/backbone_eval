@@ -73,7 +73,7 @@ class BackboneEvalConfig:
     topk_fraction: float = 0.0
 
     # --- prompts -------------------------------------------------------------
-    n_ctx: int = 8
+    n_ctx: int = 12                          # AnomalyCLIP's default
     # AnomalyCLIP scales both image and patch similarities by 1/0.07 rather than
     # by the backbone's learned logit scale, and so does the group's own
     # object-agnostic-prompt-training. A shared value also puts both backbones'

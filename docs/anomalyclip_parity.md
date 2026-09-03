@@ -12,14 +12,16 @@ the notebook this repository started from:
 2. **The group's own** `Parsagh05/object-agnostic-prompt-training`, which was
    built to match AnomalyCLIP for the adversarial track.
 
-Eight deviations were found. Seven are fixed; one is a deliberate, cited
-difference.
+Eight deviations were found. All eight are fixed: the learnable-prompt setting
+now matches AnomalyCLIP on every point that the protocol does not deliberately
+remove.
 
 ## Matched
 
 | Aspect | AnomalyCLIP | Here |
 | --- | --- | --- |
 | prompt form | `[X × n] object` / `[X × n] damaged object`, `classnames = ["object"]` | same |
+| `n_ctx` | 12 | 12 |
 | object-agnostic | no class name in the learnable prompt | same |
 | deep text-prompt tuning | present (`compound_prompts_text`, depth 9) | **deliberately absent** |
 | DPAM visual surgery, learnable visual tokens, feature adapters | present | **deliberately absent** |
@@ -79,13 +81,19 @@ context real token-scale magnitude, which can swamp the fixed suffix and start
 `object` and `damaged object` nearly on top of each other. At `N(0, 0.02)` the
 suffix dominates early, so the two prompts start apart.
 
-## Deliberate difference
+## A note on `n_ctx`
 
-| Aspect | AnomalyCLIP | Here | Reason |
-| --- | --- | --- | --- |
-| `n_ctx` | 12 | **8** | Tipsomaly's own ablation (Figure 3) finds 8 best and reports that longer prompts overfit the source domain and generalise worse — which is the failure mode this cross-dataset protocol is most exposed to. |
+Runs up to `8ffd5f816d58` used `n_ctx = 8`, following Tipsomaly's ablation
+(Figure 3), which finds 8 best and reports longer prompts overfitting the source
+domain — the failure this cross-dataset protocol is most exposed to.
 
-Worth confirming with Alireza. One line in the config if he wants strict parity.
+Now 12, AnomalyCLIP's default, because that is the reference Alireza named and
+an unexplained deviation costs more than it buys. `n_ctx` is part of the config
+fingerprint, so 8 and 12 produce separate artefacts and can sit side by side as
+an ablation rather than a choice made in advance.
+
+Verified that 12 tokenises cleanly for SigLIP2: the placeholder maps to exactly
+12 tokens and the full prompt occupies 15 of the 64 positions.
 
 ## Not applicable
 
