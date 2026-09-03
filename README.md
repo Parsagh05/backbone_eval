@@ -173,9 +173,26 @@ one clean pass over both protocol directions:
 All three prompt modes come out of one forward pass, so measuring `fixed`,
 `learned` and `decoupled` costs the same as measuring one.
 
-On a **Kaggle T4**, clean-only, both backbones: **about 1.5-2.5 hours**, plus
-10-15 minutes of weight downloads (CLIP ViT-L/14@336 is ~890 MB, SigLIP2
-ViT-L/16-384 ~3.5 GB). Comfortably inside one 12-hour session.
+On a **Kaggle T4**, clean-only, both backbones: **roughly 8-13 hours** at the
+default 15 epochs, plus 10-15 minutes of weight downloads (CLIP ViT-L/14@336 is
+~890 MB, SigLIP2 ViT-L/16-384 ~3.5 GB).
+
+Prompt fitting dominates: at 15 epochs it is about 58,000 forward passes per
+backbone against 3,900 for the evaluation sweep. Two levers if that does not fit
+a session:
+
+- `resume=True` (the default) — prompt checkpoints are written per
+  (backbone, source) and shards per cell, so a run continues across sessions.
+  A session needs to finish one source's fit to checkpoint it.
+- `max_train_images_per_category` — 8 learnable context vectors do not need
+  1,700 images. Capping at 50 cuts fitting roughly fivefold. It is part of the
+  config fingerprint, so a capped run cannot be confused with a full one.
+
+Epochs was 2 through run `1f2fb45b459e`, which was not enough: the prompts
+collapsed onto "normal everywhere" and pixel AUROC came out at exactly 50.0.
+See [docs/first_run_findings.md](docs/first_run_findings.md). Training now
+reports the abnormal channel's mean and peak each epoch and warns when it never
+rises above `COLLAPSE_PEAK`, so this is visible while it happens.
 
 CLIP runs at 518px (37x37 = 1,369 tokens) and is the slower of the two;
 SigLIP2 runs at its native 384px (24x24 = 576 tokens) but currently encodes
@@ -264,6 +281,21 @@ post-hoc reporting, published-comparison and qualitative-figure cells. The
 first is a straightforward addition behind the same registry; the second
 operates on stored artefacts and can be written against the tables.
 
-**No benchmark numbers have been produced yet** — everything verified so far is
-correctness, not performance. See [docs/provenance_note.md](docs/provenance_note.md)
-for why the CSVs in `vendor/` should not be treated as measurements.
+## Results so far
+
+The first measured run is written up in
+[docs/first_run_findings.md](docs/first_run_findings.md). In short:
+
+- **SigLIP2 localisation is not at chance.** Fixed-prompt pixel AUROC of 82.1
+  (MVTec) and 78.9 (VisA) against the 47.3 / 47.0 reported in Tipsomaly Table 9,
+  with AUPRO 74.1 / 68.0 against 0.1 / 0.0, and **no category below chance**.
+  The published failure was the readout, not the backbone.
+- **The CLIP baseline was broken** — below chance in 14 of 27 categories,
+  because the value-path surgery reached only the last of four layers read.
+  Fixed in 0.2.0.
+- **Learned prompts collapsed** onto a constant map at 2 epochs. Now 15, with a
+  warning when the abnormal channel never lifts off zero.
+
+The comparison needs re-running under 0.2.0 before it is quotable. The CSVs in
+`vendor/` remain transcriptions, not measurements — see
+[docs/provenance_note.md](docs/provenance_note.md).

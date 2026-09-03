@@ -16,7 +16,7 @@
   "map_res": 64,
   "n_ctx": 8,
   "loss_mode": "local",
-  "epochs": 2,
+  "epochs": 15,
   "batch_size": 8,
 
   "corruptions_enabled": false,

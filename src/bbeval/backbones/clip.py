@@ -98,7 +98,6 @@ class ClipBackbone(Backbone):
     def encode(self, x: torch.Tensor) -> dict[str, Any]:
         visual = self.visual
         grid = x.shape[-1] // self.patch_size
-        value_layer = max(self.layers)
 
         tokens = visual.conv1(x)
         tokens = tokens.reshape(tokens.shape[0], tokens.shape[1], -1).permute(0, 2, 1)
@@ -107,19 +106,21 @@ class ClipBackbone(Backbone):
         tokens = torch.cat([class_token, tokens], dim=1) + self._pos_embed
         hidden = visual.ln_pre(tokens).permute(1, 0, 2)      # NLD -> LND
 
-        pre_value, dense = None, {}
+        dense = {}
         for depth, block in enumerate(visual.transformer.resblocks, start=1):
-            if depth == value_layer:
-                pre_value = hidden
+            previous = hidden
             hidden = block(hidden)
             if depth in self.layers:
-                dense[depth] = self._project(hidden.permute(1, 0, 2)[:, 1:])
+                # Raw CLIP patch-text cosine is anti-correlated with the object
+                # -- the "opposite visualisation" that CLIP-Surgery describes --
+                # so the value path is taken at *every* layer that is read, not
+                # only the last. Mixing raw layers into the average drags the
+                # map below chance. The main forward keeps the ordinary block
+                # output, so the global embedding is untouched.
+                source = (_value_block(block, previous)
+                          if self.config.use_value_attention else hidden)
+                dense[depth] = self._project(source.permute(1, 0, 2)[:, 1:])
         global_embedding = self._project(hidden.permute(1, 0, 2)[:, :1])[:, 0]
-
-        if self.config.use_value_attention and pre_value is not None:
-            patched = _value_block(visual.transformer.resblocks[value_layer - 1],
-                                   pre_value)
-            dense[value_layer] = self._project(patched.permute(1, 0, 2)[:, 1:])
 
         return {
             "object": global_embedding,

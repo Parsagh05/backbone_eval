@@ -1,0 +1,106 @@
+# First measured run — findings
+
+Run `1f2fb45b459e`, seed 111, clean only, both protocol directions, MVTec + VisA.
+These are the first *measured* numbers in this track; the CSVs in `vendor/` were
+transcribed from Tipsomaly (see [provenance_note.md](provenance_note.md)).
+
+## 1. SigLIP2 localisation is not at chance — the published failure was a readout bug
+
+| SigLIP2, fixed prompts | Tipsomaly Table 9 | This run |
+| --- | --- | --- |
+| MVTec pixel AUROC | 47.3 | **82.1** |
+| VisA pixel AUROC | 47.0 | **78.9** |
+| MVTec AUPRO | 00.1 | **74.1** |
+| VisA AUPRO | 00.0 | **68.0** |
+
+**0 of 27 categories fall below chance.** The weakest is transistor at 59.7; the
+strongest are candle 97.5, carpet 96.5, zipper 96.4, macaroni1 94.9.
+
+The only change is the dense readout: pooling each patch through the model's own
+`trunk.attn_pool` instead of comparing unprojected trunk tokens to text. This is
+the result the repository exists to establish, and it confirms the diagnosis in
+[siglip2_defects.md](siglip2_defects.md) (D2).
+
+Image level corroborates rather than contradicts: 93.2 MVTec AUROC here against
+88.7 reported, so the image path is sane and the pixel gain is not an artefact
+of a differently-scaled score.
+
+Not a strict reproduction — Tipsomaly scores through the TIPS framework at 518px
+and this harness runs SigLIP2 at its native 384px — but the direction is not
+subtle.
+
+## 2. The CLIP baseline was broken, not merely weaker
+
+CLIP fixed-prompt pixel AUROC was **below chance in 14 of 27 categories**:
+leather 3.1, grid 6.5, bottle 14.0, carpet 15.1, wood 19.0, pcb4 19.8.
+
+Below chance means the map is *anti-correlated* with the defect — it reliably
+highlights the wrong pixels. That is the "opposite visualisation" of raw CLIP
+patch-text similarity that CLIP-Surgery describes, and the reason WinCLIP and
+AnomalyCLIP apply attention surgery at all.
+
+**Cause.** `use_value_attention` patched only `max(layers)` — layer 24 — while
+layers 6, 12 and 18 were read raw and averaged in alongside it by
+`dense_logits`, dragging the result under chance.
+
+**Fixed** in 0.2.0: the value path is taken at *every* layer that is read. The
+main forward still uses the ordinary block output, so the global embedding is
+bit-identical and image-level numbers stay comparable
+(`tests/test_clip_backbone.py` pins both properties).
+
+Until this is re-run, no SigLIP2-vs-CLIP comparison from run `1f2fb45b459e`
+should be quoted: it compares a fixed SigLIP2 against a broken CLIP.
+
+## 3. Learned prompts collapsed onto "normal everywhere"
+
+CLIP's learned prompts evaluated on MVTec produced a literally constant map:
+
+```
+clip learned mvtec hazelnut   maps mean 0.0000 std 0.00000 min 0.0000 max 0.0000
+```
+
+Hence pixel AUROC of exactly 50.0. SigLIP2's were nearly as degenerate
+(mean 0.0004, std 0.0037). Fixed prompts beat learned ones everywhere:
+82.1 → 71.2 on MVTec, 78.9 → 62.8 on VisA.
+
+**Leading hypothesis: the class balance of the training split.** For a normal
+image the mask is all zero, so `dice(prob[:, 1], target)` reduces to
+`1 - 1/(sum(prob_abnormal) + 1)`, which is minimised by driving the abnormal
+channel to zero *everywhere*. The direction of the failure matches the split
+composition exactly:
+
+| Prompts fitted on | Composition | Evaluated on | Pixel AUROC |
+| --- | --- | --- | --- |
+| VisA test (1,200 normal / 962 anomalous — mostly normal) | normal-heavy | MVTec | **50.0**, constant map |
+| MVTec test (467 normal / 1,258 anomalous — mostly anomalous) | anomaly-heavy | VisA | 94.7 |
+
+The normal-heavy source collapses; the anomaly-heavy one does not.
+
+**Changed in 0.2.0:** `epochs` 2 → 15, matching AnomalyCLIP, on the theory that
+two epochs never left the basin the pixel loss starts in. This is a hypothesis,
+not a demonstrated fix.
+
+**Also added:** `train_prompts` now reports the mean and peak of the abnormal
+channel each epoch and prints a warning when the peak never exceeds
+`COLLAPSE_PEAK` (0.01). A collapse is now visible during training instead of
+being discovered hours later as a table of 50.0.
+
+If 15 epochs does not resolve it, the next things to try, in order: a lower
+learning rate; class-balanced sampling in `make_train_loader`; reweighting the
+normal-region dice term.
+
+## Consequences for reproducibility
+
+Both fixes change results without changing any setting that used to enter the
+config fingerprint, so run `1f2fb45b459e` would have been silently resumed on
+top of. Fixed in 0.2.0:
+
+- the package version is part of the fingerprint, so a behaviour change
+  invalidates earlier artefacts;
+- `epochs`, `learning_rate` and `max_train_images_per_category` are part of the
+  fingerprint;
+- the prompt checkpoint filename carries `epochs`, so a 15-epoch fit cannot load
+  a 2-epoch checkpoint.
+
+Delete nothing: the previous run stays valid under its own id, and remains the
+"raw readout / 2 epochs" control.

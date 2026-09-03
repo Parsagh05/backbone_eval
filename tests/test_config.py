@@ -38,6 +38,20 @@ def test_fingerprint_tracks_settings_that_change_results():
     # The readout is the whole point of the comparison, so it must change the id.
     assert base.fingerprint() != make(siglip2_dense_readout="raw").fingerprint()
     assert base.fingerprint() != make(seed=222).fingerprint()
+    # Prompt fitting changes the learned map. Missing these meant a re-run with
+    # different training would silently resume on the previous run's shards.
+    assert base.fingerprint() != make(epochs=2).fingerprint()
+    assert base.fingerprint() != make(learning_rate=1e-4).fingerprint()
+    assert base.fingerprint() != make(max_train_images_per_category=20).fingerprint()
+
+
+def test_fingerprint_includes_the_code_revision(monkeypatch):
+    """A behaviour change must invalidate earlier artefacts, not resume on them."""
+    import bbeval.config as config_module
+
+    before = make().fingerprint()
+    monkeypatch.setattr(config_module, "__version__", "9.9.9")
+    assert make().fingerprint() != before
 
 
 def test_fingerprint_ignores_settings_that_do_not_change_results():

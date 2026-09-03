@@ -11,6 +11,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from ._version import __version__
+
 # pptx slide 21: only the test splits are read, and the two roles are disjoint.
 DEFAULT_PROTOCOL = (("mvtec", "visa"), ("visa", "mvtec"))
 
@@ -82,7 +84,9 @@ class BackboneEvalConfig:
     focal_gamma: float = 2.0
     image_loss_weight: float = 1.0
     pixel_loss_weight: float = 1.0
-    epochs: int = 2
+    # AnomalyCLIP's setting. Two epochs was not enough to leave the
+    # "normal everywhere" basin the pixel loss starts in.
+    epochs: int = 15
     batch_size: int = 8
     learning_rate: float = 1e-3
     adam_betas: tuple[float, float] = (0.5, 0.999)
@@ -172,6 +176,9 @@ class BackboneEvalConfig:
     def fingerprint(self) -> str:
         """Identifies the settings a stored artefact was produced under."""
         payload = {
+            # A behaviour change must invalidate earlier artefacts rather than
+            # resume on top of them, so the code revision is part of the id.
+            "revision": __version__,
             "seed": self.seed,
             "input": self.input_size,
             "map_res": self.map_res,
@@ -188,6 +195,10 @@ class BackboneEvalConfig:
             "global_token": self.global_token,
             "local_evidence": self.add_local_evidence,
             "sigma": self.gaussian_sigma,
+            # Prompt fitting changes the learned map, so it changes the id.
+            "epochs": self.epochs,
+            "lr": self.learning_rate,
+            "train_cap": self.max_train_images_per_category,
         }
         blob = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.blake2b(blob.encode(), digest_size=6).hexdigest()

@@ -15,13 +15,17 @@ from .losses import prompt_loss
 from .prompts import LearnablePrompts
 from .scoring import training_logits
 
+# Below this peak abnormal probability the map is constant for every practical
+# purpose, and every pixel metric degenerates to chance.
+COLLAPSE_PEAK = 0.01
+
 
 def checkpoint_path(config: BackboneEvalConfig, backbone_name: str, source: str) -> str:
     os.makedirs(config.checkpoint_dir, exist_ok=True)
     return os.path.join(
         config.checkpoint_dir,
         f"{backbone_name}_{source}_{config.loss_mode}_ctx{config.n_ctx}"
-        f"_seed{config.seed}.pt")
+        f"_ep{config.epochs}_seed{config.seed}.pt")
 
 
 def assert_prompt_learning_only(config: BackboneEvalConfig, backbone: Backbone,
@@ -71,8 +75,9 @@ def train_prompts(config: BackboneEvalConfig, backbone: Backbone, source: str,
               f"parameters on {len(loader.dataset)} images "
               f"({config.epochs} epochs, {config.loss_mode} loss)")
     prompts.train()
+    peak = 0.0
     for epoch in range(config.epochs):
-        started, running, seen = time.time(), 0.0, 0
+        started, running, seen, average, peak = time.time(), 0.0, 0, 0.0, 0.0
         for batch in loader:
             image_logits, pixel_logits = training_logits(
                 config, backbone, prompts, batch["image"])
@@ -84,11 +89,28 @@ def train_prompts(config: BackboneEvalConfig, backbone: Backbone, source: str,
             torch.nn.utils.clip_grad_norm_(trainable, config.grad_clip)
             optimizer.step()
             scheduler.step()
-            running += loss.item() * batch["label"].shape[0]
-            seen += batch["label"].shape[0]
+            count = batch["label"].shape[0]
+            running += loss.item() * count
+            seen += count
+            # The abnormal channel is what becomes the anomaly map. Watching it
+            # here is the difference between noticing a collapse now and
+            # discovering a table of 50.0 pixel AUROC hours later.
+            with torch.no_grad():
+                abnormal = pixel_logits.softmax(dim=1)[:, 1]
+                average += float(abnormal.mean()) * count
+                peak = max(peak, float(abnormal.max()))
         if verbose:
             print(f"    epoch {epoch + 1}/{config.epochs}  "
-                  f"loss {running / max(seen, 1):.4f}  ({time.time() - started:.0f}s)")
+                  f"loss {running / max(seen, 1):.4f}  "
+                  f"map mean {average / max(seen, 1):.4f} peak {peak:.4f}  "
+                  f"({time.time() - started:.0f}s)")
+
+    if peak < COLLAPSE_PEAK:
+        print(f"  WARNING [{backbone.name}/{source}] the abnormal channel never "
+              f"exceeded {peak:.2e}: the prompts have collapsed onto 'normal "
+              f"everywhere' and the anomaly map will be constant. Pixel AUROC "
+              f"will come out at chance. Try more epochs or a lower "
+              f"learning rate.", flush=True)
 
     prompts.eval()
     torch.save(prompts.state_dict(), path)
