@@ -28,14 +28,24 @@ PAIRS = {
 }
 
 
-def dense_logits(dense: Mapping[int, torch.Tensor], text: torch.Tensor,
-                 logit_scale: float) -> torch.Tensor:
-    """Patch-text logits, averaged over the selected blocks -> [B, 2, h, w]."""
+def dense_logits_per_layer(dense: Mapping[int, torch.Tensor], text: torch.Tensor,
+                           logit_scale: float) -> torch.Tensor:
+    """Patch-text logits for each selected block -> [L, B, 2, h, w].
+
+    AnomalyCLIP supervises every layer separately, so training needs the stack
+    rather than the average.
+    """
     per_layer = []
     for _, tokens in sorted(dense.items()):
         normed = F.normalize(tokens.float(), dim=-1)
         per_layer.append(logit_scale * torch.einsum("bhwd,kd->bkhw", normed, text))
-    return torch.stack(per_layer).mean(dim=0)
+    return torch.stack(per_layer)
+
+
+def dense_logits(dense: Mapping[int, torch.Tensor], text: torch.Tensor,
+                 logit_scale: float) -> torch.Tensor:
+    """Patch-text logits, averaged over the selected blocks -> [B, 2, h, w]."""
+    return dense_logits_per_layer(dense, text, logit_scale).mean(dim=0)
 
 
 def global_logits(features: Mapping[str, Any], text: torch.Tensor,
@@ -110,10 +120,16 @@ def anomaly_outputs(config: BackboneEvalConfig, backbone: Backbone,
 
 def training_logits(config: BackboneEvalConfig, backbone: Backbone, prompts,
                     images_uint8: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Image logits [B, 2] and per-layer pixel logits [L, B, 2, h, w].
+
+    Pixel logits are returned per layer, not averaged: AnomalyCLIP applies the
+    focal and dice terms to each layer's map and sums them, which supervises
+    every layer that is read instead of letting one compensate for another.
+    """
     with torch.autocast("cuda", enabled=(config.amp and config.device == "cuda")):
         features = backbone.encode(backbone.preprocess(images_uint8))
     text = prompts()
     logit_scale = 1.0 / backbone.temperature
     return (global_logits(features, text, logit_scale, config,
                           backbone.has_two_global_tokens),
-            dense_logits(features["dense"], text, logit_scale))
+            dense_logits_per_layer(features["dense"], text, logit_scale))

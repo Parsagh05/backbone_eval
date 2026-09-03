@@ -225,6 +225,28 @@ Three prompt modes come out of one visual forward pass: `fixed` (template ×
 state ensemble, no training), `learned`, and `decoupled` (fixed score, learned
 map).
 
+**Learned prompts follow AnomalyCLIP's object-agnostic form** — `[v1…v8] object`
+and `[u1…u8] damaged object`, no class name — trained with AnomalyCLIP's
+objective:
+
+```
+image_cross_entropy + lam * sum_over_layers(focal + dice_abnormal + dice_normal)
+```
+
+with `lam = 4`, 15 epochs, lr 1e-3. The pixel terms are applied to **each
+layer's** map and summed, not to a layer-averaged map, so every layer that is
+read has to be discriminative on its own.
+
+What is deliberately *not* taken from AnomalyCLIP: deep prompt tuning inside the
+text transformer, DPAM visual surgery, learnable visual tokens, and adapters on
+the intermediate features. Only the shallow context vectors train.
+
+`loss_mode` selects halves of that objective — `"both"` is AnomalyCLIP,
+`"local"` drops the image term (Tipsomaly's localisation-only ablation) and
+`"global"` keeps only it. `"local"` was the default through run
+`1f2fb45b459e` and left nothing opposing a collapse onto "normal everywhere";
+see [docs/first_run_findings.md](docs/first_run_findings.md).
+
 Seed 111. Metrics: pixel AUROC / F1-max / AUPRO / threshold, image AUROC /
 F1-max / AP / threshold, plus ECE for the slide-24 calibration track.
 Low-resolution maps and raw scores are stored so any metric can be recomputed

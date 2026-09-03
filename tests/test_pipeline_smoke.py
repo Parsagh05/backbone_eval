@@ -198,6 +198,44 @@ def test_shards_round_trip_for_every_prompt_mode(result, config):
         assert shard["meta"]["config_id"] == config.fingerprint()
 
 
+def test_training_supervises_every_layer_and_matches_anomalyclip(config):
+    """AnomalyCLIP applies focal + dice per layer and sums, then adds image CE.
+
+    Averaging the layers first lets one compensate for another, and dropping
+    the image term removes the only thing opposing a collapse onto "normal
+    everywhere".
+    """
+    from dataclasses import replace
+
+    from bbeval.engine import load_backbones
+    from bbeval.losses import prompt_loss
+    from bbeval.prompts import LearnablePrompts
+    from bbeval.scoring import training_logits
+
+    backbone = load_backbones(config)["stub"]
+    prompts = LearnablePrompts(config, backbone)
+    images = torch.randint(0, 255, (2, 3, IMAGE_SIZE, IMAGE_SIZE), dtype=torch.uint8)
+    image_logits, pixel_logits = training_logits(config, backbone, prompts, images)
+
+    # Per-layer stack, not a merged map.
+    assert pixel_logits.ndim == 5
+    assert pixel_logits.shape[0] == len(backbone.layers)
+    assert image_logits.shape == (2, 2)
+
+    labels = torch.tensor([0, 1])
+    masks = torch.zeros(2, config.map_res, config.map_res)
+    masks[1, 2:5, 2:5] = 1.0
+
+    both = prompt_loss(config, image_logits, pixel_logits, labels, masks)
+    local = prompt_loss(replace(config, loss_mode="local"), image_logits,
+                        pixel_logits, labels, masks)
+    glob = prompt_loss(replace(config, loss_mode="global"), image_logits,
+                       pixel_logits, labels, masks)
+    assert torch.allclose(both, local + glob, atol=1e-5)
+    # The image term is what "local" was missing.
+    assert glob > 0 and not torch.allclose(both, local)
+
+
 def test_run_shard_without_saving_returns_named_arrays(config):
     """The exact shape the notebook's smoke cell consumes.
 

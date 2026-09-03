@@ -80,10 +80,13 @@ class BackboneEvalConfig:
     fixed_prompt_class_name: str | None = None
 
     # --- prompt fitting ------------------------------------------------------
-    loss_mode: str = "local"
+    # AnomalyCLIP's objective: image cross-entropy plus the mask-supervised
+    # pixel terms. "local" drops the image term (Tipsomaly's localisation-only
+    # ablation) and leaves nothing opposing a collapse onto "normal everywhere".
+    loss_mode: str = "both"
     focal_gamma: float = 2.0
     image_loss_weight: float = 1.0
-    pixel_loss_weight: float = 1.0
+    pixel_loss_weight: float = 4.0          # AnomalyCLIP's lam
     # AnomalyCLIP's setting. Two epochs was not enough to leave the
     # "normal everywhere" basin the pixel loss starts in.
     epochs: int = 15
@@ -199,6 +202,9 @@ class BackboneEvalConfig:
             "epochs": self.epochs,
             "lr": self.learning_rate,
             "train_cap": self.max_train_images_per_category,
+            "image_weight": self.image_loss_weight,
+            "pixel_weight": self.pixel_loss_weight,
+            "focal_gamma": self.focal_gamma,
         }
         blob = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.blake2b(blob.encode(), digest_size=6).hexdigest()

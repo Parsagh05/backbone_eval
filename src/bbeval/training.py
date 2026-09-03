@@ -96,7 +96,9 @@ def train_prompts(config: BackboneEvalConfig, backbone: Backbone, source: str,
             # here is the difference between noticing a collapse now and
             # discovering a table of 50.0 pixel AUROC hours later.
             with torch.no_grad():
-                abnormal = pixel_logits.softmax(dim=1)[:, 1]
+                # Averaged over layers, which is what inference scores.
+                merged = pixel_logits.mean(0) if pixel_logits.ndim == 5 else pixel_logits
+                abnormal = merged.softmax(dim=1)[:, 1]
                 average += float(abnormal.mean()) * count
                 peak = max(peak, float(abnormal.max()))
         if verbose:

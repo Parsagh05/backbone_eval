@@ -76,18 +76,48 @@ composition exactly:
 
 The normal-heavy source collapses; the anomaly-heavy one does not.
 
-**Changed in 0.2.0:** `epochs` 2 → 15, matching AnomalyCLIP, on the theory that
-two epochs never left the basin the pixel loss starts in. This is a hypothesis,
-not a demonstrated fix.
+**Root cause: the objective was not AnomalyCLIP's.** Run `1f2fb45b459e` used
+`loss_mode="local"` — the pixel terms only, with **no image-level
+cross-entropy**. Nothing in that objective opposes "predict normal everywhere":
+the abnormal dice term is the sole counterweight, and on a normal-heavy split it
+loses. AnomalyCLIP's image cross-entropy directly penalises calling an anomalous
+image normal, which is exactly the missing pressure.
 
-**Also added:** `train_prompts` now reports the mean and peak of the abnormal
-channel each epoch and prints a warning when the peak never exceeds
-`COLLAPSE_PEAK` (0.01). A collapse is now visible during training instead of
-being discovered hours later as a table of 50.0.
+AnomalyCLIP's `train.py`:
 
-If 15 epochs does not resolve it, the next things to try, in order: a lower
-learning rate; class-balanced sampling in `make_train_loader`; reweighting the
-normal-region dice term.
+```python
+image_loss = F.cross_entropy(text_probs, label)      # always included
+loss = 0
+for i in range(len(similarity_map_list)):            # per layer, summed
+    loss += loss_focal(similarity_map_list[i], gt)
+    loss += loss_dice(similarity_map_list[i][:, 1], gt)
+    loss += loss_dice(similarity_map_list[i][:, 0], 1 - gt)
+loss = lam * loss                                    # lam = 4
+(loss + image_loss).backward()
+```
+
+Three deviations, all fixed in 0.3.0:
+
+| | run `1f2fb45b459e` | AnomalyCLIP / 0.3.0 |
+| --- | --- | --- |
+| image cross-entropy | absent (`loss_mode="local"`) | included (`loss_mode="both"`) |
+| pixel terms | applied to the layer-*averaged* map | applied per layer and summed |
+| pixel weight | 1.0 | 4.0 (`lam`) |
+| epochs | 2 | 15 |
+
+Averaging the layers before the loss also mattered: it lets one layer compensate
+for another instead of forcing every layer that is read to be discriminative.
+With four CLIP layers this is a real difference; SigLIP2 reads one layer, so
+only CLIP is affected.
+
+**Also added:** `train_prompts` reports the mean and peak of the abnormal
+channel each epoch and warns when the peak never exceeds `COLLAPSE_PEAK` (0.01).
+A collapse is now visible during training instead of being discovered hours
+later as a table of 50.0.
+
+If it still collapses, the next things to try, in order: a lower learning rate;
+class-balanced sampling in `make_train_loader`; reweighting the normal-region
+dice term.
 
 ## Consequences for reproducibility
 
