@@ -1,8 +1,8 @@
 """Turning patch and text embeddings into anomaly scores and maps.
 
-Patch and text embeddings are compared by cosine similarity, scaled by the
-backbone's own contrastive temperature, and softmaxed over
-{normal, anomalous}; the anomalous channel is the anomaly map.
+Patch and text embeddings are compared by cosine similarity, scaled by
+`logit_scale_for` and softmaxed over {normal, anomalous}; the anomalous channel
+is the anomaly map.
 
 Note on SigLIP2: a two-class softmax over `t*cos + b` is invariant to the
 learned bias `b`, which cancels between the two prompts. The softmax score is
@@ -26,6 +26,19 @@ PAIRS = {
     "learned": ("learned", "learned"),
     "decoupled": ("fixed", "learned"),
 }
+
+
+def logit_scale_for(config: BackboneEvalConfig, backbone: Backbone) -> float:
+    """The scale applied to every cosine, for training and inference alike.
+
+    Defaults to AnomalyCLIP's 1/0.07 rather than the backbone's learned scale
+    (CLIP 100, SigLIP2 ~108), which saturates the two-class softmax and flattens
+    the focal gradient. Ranking metrics are invariant to it, but the training
+    signal and the score fusion `global + max(map)` are not.
+    """
+    temperature = (config.map_temperature if config.map_temperature is not None
+                   else backbone.temperature)
+    return 1.0 / temperature
 
 
 def dense_logits_per_layer(dense: Mapping[int, torch.Tensor], text: torch.Tensor,
@@ -95,7 +108,7 @@ def anomaly_outputs(config: BackboneEvalConfig, backbone: Backbone,
     All modes come out of a single visual forward pass, so measuring three
     costs almost nothing over measuring one.
     """
-    logit_scale = 1.0 / backbone.temperature
+    logit_scale = logit_scale_for(config, backbone)
     with torch.autocast("cuda", enabled=(config.amp and config.device == "cuda")):
         features = backbone.encode(backbone.preprocess(images_uint8))
 
@@ -129,7 +142,7 @@ def training_logits(config: BackboneEvalConfig, backbone: Backbone, prompts,
     with torch.autocast("cuda", enabled=(config.amp and config.device == "cuda")):
         features = backbone.encode(backbone.preprocess(images_uint8))
     text = prompts()
-    logit_scale = 1.0 / backbone.temperature
+    logit_scale = logit_scale_for(config, backbone)
     return (global_logits(features, text, logit_scale, config,
                           backbone.has_two_global_tokens),
             dense_logits_per_layer(features["dense"], text, logit_scale))

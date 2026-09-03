@@ -74,6 +74,15 @@ class BackboneEvalConfig:
 
     # --- prompts -------------------------------------------------------------
     n_ctx: int = 8
+    # AnomalyCLIP scales both image and patch similarities by 1/0.07 rather than
+    # by the backbone's learned logit scale, and so does the group's own
+    # object-agnostic-prompt-training. A shared value also puts both backbones'
+    # maps on the same sharpness, which matters because the image score adds
+    # max(map) to a probability. None -> use each backbone's learned scale.
+    map_temperature: float | None = 0.07
+    # AnomalyCLIP initialises context vectors from N(0, 0.02), not from the
+    # embeddings of the "X" placeholder tokens.
+    init_std: float = 0.02
     learnable_suffix: dict[str, str] = field(
         default_factory=lambda: {"normal": "object", "anomalous": "damaged object"})
     # None -> use the real category name, which is available zero-shot.
@@ -158,6 +167,10 @@ class BackboneEvalConfig:
             raise ValueError("input_size and map_res must be positive")
         if self.n_ctx <= 0:
             raise ValueError("n_ctx must be positive")
+        if self.map_temperature is not None and self.map_temperature <= 0:
+            raise ValueError("map_temperature must be positive or None")
+        if self.init_std <= 0:
+            raise ValueError("init_std must be positive")
 
     # --- derived -------------------------------------------------------------
     @property
@@ -205,6 +218,8 @@ class BackboneEvalConfig:
             "image_weight": self.image_loss_weight,
             "pixel_weight": self.pixel_loss_weight,
             "focal_gamma": self.focal_gamma,
+            "map_temperature": self.map_temperature,
+            "init_std": self.init_std,
         }
         blob = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.blake2b(blob.encode(), digest_size=6).hexdigest()

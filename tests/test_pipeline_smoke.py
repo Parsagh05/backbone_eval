@@ -42,7 +42,7 @@ class StubBackbone(Backbone):
         self.embed_dim = EMBED
         self.depth = 2
         self.layers = (2,)
-        self.temperature = 0.07
+        self.temperature = 0.01      # deliberately not 0.07
         self.image_size = IMAGE_SIZE
         self.patch_size = PATCH
         self.grid = IMAGE_SIZE // PATCH
@@ -234,6 +234,59 @@ def test_training_supervises_every_layer_and_matches_anomalyclip(config):
     assert torch.allclose(both, local + glob, atol=1e-5)
     # The image term is what "local" was missing.
     assert glob > 0 and not torch.allclose(both, local)
+
+
+def test_logit_scale_follows_anomalyclip_by_default(config):
+    """AnomalyCLIP scales by 1/0.07, not by the backbone's learned scale."""
+    from dataclasses import replace
+
+    from bbeval.engine import load_backbones
+    from bbeval.scoring import logit_scale_for
+
+    backbone = load_backbones(config)["stub"]
+    assert logit_scale_for(config, backbone) == pytest.approx(1.0 / 0.07)
+    own = replace(config, map_temperature=None)
+    assert logit_scale_for(own, backbone) == pytest.approx(1.0 / backbone.temperature)
+
+
+def test_context_is_initialised_from_a_narrow_gaussian(config):
+    """N(0, init_std), as AnomalyCLIP does -- not the "X" placeholder embeddings."""
+    from bbeval.engine import load_backbones
+    from bbeval.prompts import LearnablePrompts
+
+    backbone = load_backbones(config)["stub"]
+    ctx = LearnablePrompts(config, backbone).ctx
+    ctx = ctx.detach()
+    assert abs(float(ctx.mean())) < 0.01
+    assert float(ctx.std()) == pytest.approx(config.init_std, rel=0.4)
+
+
+def test_small_defects_survive_into_the_pixel_loss(config):
+    """The prediction is upsampled to the mask, not the mask shrunk to the grid.
+
+    A defect a few pixels across vanishes entirely when a 64x64 mask is
+    area-downsampled to a 4x4 patch grid, so it would contribute nothing.
+    """
+    from bbeval.engine import load_backbones
+    from bbeval.losses import prompt_loss
+    from bbeval.prompts import LearnablePrompts
+    from bbeval.scoring import training_logits
+
+    backbone = load_backbones(config)["stub"]
+    prompts = LearnablePrompts(config, backbone)
+    images = torch.randint(0, 255, (2, 3, IMAGE_SIZE, IMAGE_SIZE), dtype=torch.uint8)
+    image_logits, pixel_logits = training_logits(config, backbone, prompts, images)
+    labels = torch.tensor([0, 1])
+
+    assert pixel_logits.shape[-1] < config.map_res, "grid must be coarser than the mask"
+    blank = torch.zeros(2, config.map_res, config.map_res)
+    tiny = blank.clone()
+    # One pixel of an 8x8 mask. Area-downsampled to the 4x4 grid it averages to
+    # 0.25 and is thresholded away, so the old path saw an empty target.
+    tiny[1, 3, 3] = 1.0
+
+    assert not torch.allclose(prompt_loss(config, image_logits, pixel_logits, labels, tiny),
+                              prompt_loss(config, image_logits, pixel_logits, labels, blank))
 
 
 def test_run_shard_without_saving_returns_named_arrays(config):

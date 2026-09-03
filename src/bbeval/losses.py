@@ -42,13 +42,20 @@ def prompt_loss(config: BackboneEvalConfig, image_logits: torch.Tensor,
     if config.loss_mode in ("local", "both"):
         if pixel_logits.ndim == 4:
             pixel_logits = pixel_logits[None]
-        target = F.interpolate(masks[:, None].float(),
-                               size=pixel_logits.shape[-2:], mode="area") > 0.5
-        target = target[:, 0].long()
+        # Upsample the prediction to the mask, as AnomalyCLIP does, rather than
+        # shrinking the mask to the patch grid. Downsampling a 64x64 mask to a
+        # 24x24 grid loses small defects outright, and it also trained against a
+        # different target than the metrics are computed on.
+        target = (masks > 0.5).long()
         truth = target.float()
         pixel = total.new_zeros(())
         for layer_logits in pixel_logits:
             probability = layer_logits.softmax(dim=1)
+            if probability.shape[-2:] != target.shape[-2:]:
+                # Bilinear on a softmax output keeps the two channels summing to
+                # one, so the interpolated map is still a distribution.
+                probability = F.interpolate(probability, size=target.shape[-2:],
+                                            mode="bilinear", align_corners=False)
             pixel = pixel + (focal_loss(probability, target, config.focal_gamma)
                              + dice_loss(probability[:, 1], truth)
                              + dice_loss(probability[:, 0], 1.0 - truth))

@@ -241,6 +241,11 @@ What is deliberately *not* taken from AnomalyCLIP: deep prompt tuning inside the
 text transformer, DPAM visual surgery, learnable visual tokens, and adapters on
 the intermediate features. Only the shallow context vectors train.
 
+Audited line by line against AnomalyCLIP's own `train.py`, `loss.py` and
+`prompt_ensemble.py`, and against the group's
+`object-agnostic-prompt-training` — see
+[docs/anomalyclip_parity.md](docs/anomalyclip_parity.md).
+
 `loss_mode` selects halves of that objective — `"both"` is AnomalyCLIP,
 `"local"` drops the image term (Tipsomaly's localisation-only ablation) and
 `"global"` keeps only it. `"local"` was the default through run

@@ -243,7 +243,11 @@ class SigLip2Backbone(Backbone):
             raise ValueError(
                 f"SigLIP2 tokenizer maps the {n_ctx}-token placeholder to "
                 f"{measured} tokens; learnable-prompt slicing would be misaligned")
-        ctx = embeds[:, :n_ctx] + 0.02 * torch.randn_like(embeds[:, :n_ctx])
+        # AnomalyCLIP draws the context from N(0, init_std) rather than seeding
+        # it from the "X" placeholder embeddings.
+        ctx = torch.empty(len(texts), n_ctx, embeds.shape[-1],
+                          dtype=embeds.dtype, device=embeds.device)
+        torch.nn.init.normal_(ctx, std=self.config.init_std)
         return ctx, {"tail": embeds[:, n_ctx:].clone()}
 
     def _forward_text(self, embeds: torch.Tensor) -> torch.Tensor:

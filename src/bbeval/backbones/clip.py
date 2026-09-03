@@ -137,8 +137,13 @@ class ClipBackbone(Backbone):
         tokenized = clip.tokenize(texts).to(self.device)
         with torch.no_grad():
             embeds = self.model.token_embedding(tokenized)
-        seed_source = embeds[:, 1:1 + n_ctx]
-        ctx = seed_source + 0.02 * torch.randn_like(seed_source)
+        # AnomalyCLIP draws the context from N(0, init_std) rather than seeding
+        # it from the "X" placeholder embeddings: at that scale the fixed suffix
+        # dominates the prompt's meaning early, so "object" and "damaged object"
+        # start apart instead of nearly on top of each other.
+        ctx = torch.empty(len(texts), n_ctx, embeds.shape[-1],
+                          dtype=embeds.dtype, device=embeds.device)
+        torch.nn.init.normal_(ctx, std=self.config.init_std)
         aux = {
             "prefix": embeds[:, :1].clone(),               # start-of-text
             "tail": embeds[:, 1 + n_ctx:].clone(),         # suffix, EOT, padding
