@@ -33,17 +33,9 @@ VISA_CATEGORIES = (
 )
 ALL_CATEGORIES = {"mvtec": MVTEC_CATEGORIES, "visa": VISA_CATEGORIES}
 
-# Category names carry an underscore or a serial number that reads badly in a prompt.
-PROMPT_CLASS_NAMES = {
-    "metal_nut": "metal nut", "pipe_fryum": "pipe fryum",
-    "pcb1": "printed circuit board", "pcb2": "printed circuit board",
-    "pcb3": "printed circuit board", "pcb4": "printed circuit board",
-    "macaroni1": "macaroni", "macaroni2": "macaroni",
-}
-
-
 def prompt_class_name(category: str) -> str:
-    return PROMPT_CLASS_NAMES.get(category, category.replace("_", " "))
+    """WinCLIP's object label: the dataset category with underscores removed."""
+    return category.replace("_", " ")
 
 
 def categories_for(config: BackboneEvalConfig, dataset: str) -> tuple[str, ...]:

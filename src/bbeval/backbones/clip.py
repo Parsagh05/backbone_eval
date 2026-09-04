@@ -139,7 +139,7 @@ class ClipBackbone(Backbone):
             embeds = self.model.token_embedding(tokenized)
         # AnomalyCLIP draws the context from N(0, init_std) rather than seeding
         # it from the "X" placeholder embeddings: at that scale the fixed suffix
-        # dominates the prompt's meaning early, so "object" and "damaged object"
+        # dominates the prompt's meaning early, so "object." and "damaged object."
         # start apart instead of nearly on top of each other.
         ctx = torch.empty(len(texts), n_ctx, embeds.shape[-1],
                           dtype=embeds.dtype, device=embeds.device)

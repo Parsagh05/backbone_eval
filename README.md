@@ -185,7 +185,7 @@ results/
   run_manifest_<config_id>.json    resolved config + every per-backbone choice
   artifacts/<backbone>/<mode>/<dataset>/<category>/<corruption>_s<severity>.npz
   artifacts/_ground_truth/<dataset>/<category>/*.npz
-  prompts/<backbone>_<source>_<loss>_ctx<n>_seed<seed>.pt
+  prompts/<backbone>_<source>_<loss>_ctx<n>_ep<epochs>_seed<seed>_cfg<id>.pt
   tables/{category,dataset,robustness}_<config_id>.csv
 ```
 
@@ -227,7 +227,7 @@ a session:
 - `resume=True` (the default) — prompt checkpoints are written per
   (backbone, source) and shards per cell, so a run continues across sessions.
   A session needs to finish one source's fit to checkpoint it.
-- `max_train_images_per_category` — 8 learnable context vectors do not need
+- `max_train_images_per_category` — two 12-token shallow contexts do not need
   1,700 images. Capping at 50 cuts fitting roughly fivefold. It is part of the
   config fingerprint, so a capped run cannot be confused with a full one.
 
@@ -258,27 +258,29 @@ Only the **test** splits are read, and the two roles are kept disjoint
 | MVTec test split (15 categories) | VisA test split (12 categories) | none |
 | VisA test split (12 categories) | MVTec test split (15 categories) | none |
 
-The only trainable tensor anywhere is the prompt context, `[2, n_ctx, D]`. The
-backbone is held in a plain list inside `LearnablePrompts` so it is never
-registered as a submodule: the checkpoint then contains the context vectors and
-nothing else, which is the audit trail for the claim that no encoder parameter
-is touched. `assert_prompt_learning_only` re-checks this before every fit.
+The only trainable tensors anywhere are the normal and abnormal shallow prompt
+contexts, each `[n_ctx, D]`. The backbone is held in a plain list inside
+`LearnablePrompts` so it is never registered as a submodule: the checkpoint then
+contains those two contexts and nothing else, which is the audit trail for the
+claim that no encoder parameter is touched. `assert_prompt_learning_only`
+re-checks this before every fit.
 
-Three prompt modes come out of one visual forward pass: `fixed` (template ×
-state ensemble, no training), `learned`, and `decoupled` (fixed score, learned
-map).
+Three prompt modes come out of one visual forward pass: `fixed` (WinCLIP's
+published 22-template Cartesian ensemble with 7 normal and 4 anomalous states,
+using the real category name), `learned`, and `decoupled` (fixed score, learned
+map). The exact frozen vocabulary is pinned by `tests/test_prompts.py`.
 
-**Learned prompts follow AnomalyCLIP's object-agnostic form** — `[v1…v8] object`
-and `[u1…u8] damaged object`, no class name — trained with AnomalyCLIP's
-objective:
+**Learned prompts follow the group's shallow AnomalyCLIP-style reference** —
+`[v1…v12] object.` and `[u1…u12] damaged object.`, no class name — trained with
+AnomalyCLIP's objective:
 
 ```
 image_cross_entropy + lam * sum_over_layers(focal + dice_abnormal + dice_normal)
 ```
 
-with `lam = 4`, 15 epochs, lr 1e-3. The pixel terms are applied to **each
-layer's** map and summed, not to a layer-averaged map, so every layer that is
-read has to be discriminative on its own.
+with `lam = 4`, 15 epochs, and constant Adam lr 1e-3. The pixel terms are
+applied to **each layer's** map and summed, not to a layer-averaged map, so every
+layer that is read has to be discriminative on its own.
 
 What is deliberately *not* taken from AnomalyCLIP: deep prompt tuning inside the
 text transformer, DPAM visual surgery, learnable visual tokens, and adapters on

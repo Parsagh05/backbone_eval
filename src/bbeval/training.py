@@ -25,7 +25,7 @@ def checkpoint_path(config: BackboneEvalConfig, backbone_name: str, source: str)
     return os.path.join(
         config.checkpoint_dir,
         f"{backbone_name}_{source}_{config.loss_mode}_ctx{config.n_ctx}"
-        f"_ep{config.epochs}_seed{config.seed}.pt")
+        f"_ep{config.epochs}_seed{config.seed}_cfg{config.fingerprint()}.pt")
 
 
 def assert_prompt_learning_only(config: BackboneEvalConfig, backbone: Backbone,
@@ -41,10 +41,11 @@ def assert_prompt_learning_only(config: BackboneEvalConfig, backbone: Backbone,
                     f"protocol violated: {attribute} has trainable encoder "
                     "parameters (prompt learning only)")
     trainable = [p for p in prompts.parameters() if p.requires_grad]
-    expected = 2 * config.n_ctx * backbone.embed_dim
-    if len(trainable) != 1 or trainable[0].numel() != expected:
+    expected = config.n_ctx * backbone.embed_dim
+    if len(trainable) != 2 or any(parameter.numel() != expected
+                                  for parameter in trainable):
         raise AssertionError(
-            f"expected exactly one trainable tensor of {expected} elements, got "
+            f"expected exactly two trainable tensors of {expected} elements, got "
             f"{[p.numel() for p in trainable]}")
     return trainable
 
@@ -67,11 +68,9 @@ def train_prompts(config: BackboneEvalConfig, backbone: Backbone, source: str,
     optimizer = torch.optim.Adam(trainable, lr=config.learning_rate,
                                  betas=config.adam_betas,
                                  weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, config.epochs * len(loader)))
-
     if verbose:
-        print(f"  [{backbone.name}/{source}] fitting {trainable[0].numel():,} prompt "
+        trainable_count = sum(parameter.numel() for parameter in trainable)
+        print(f"  [{backbone.name}/{source}] fitting {trainable_count:,} prompt "
               f"parameters on {len(loader.dataset)} images "
               f"({config.epochs} epochs, {config.loss_mode} loss)")
     prompts.train()
@@ -86,9 +85,9 @@ def train_prompts(config: BackboneEvalConfig, backbone: Backbone, source: str,
                                batch["mask"].to(config.device))
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(trainable, config.grad_clip)
+            if config.grad_clip is not None:
+                torch.nn.utils.clip_grad_norm_(trainable, config.grad_clip)
             optimizer.step()
-            scheduler.step()
             count = batch["label"].shape[0]
             running += loss.item() * count
             seen += count

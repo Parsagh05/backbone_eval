@@ -255,8 +255,8 @@ def test_context_is_initialised_from_a_narrow_gaussian(config):
     from bbeval.prompts import LearnablePrompts
 
     backbone = load_backbones(config)["stub"]
-    ctx = LearnablePrompts(config, backbone).ctx
-    ctx = ctx.detach()
+    prompts = LearnablePrompts(config, backbone)
+    ctx = prompts.context_tensor().detach()
     assert abs(float(ctx.mean())) < 0.01
     assert float(ctx.std()) == pytest.approx(config.init_std, rel=0.4)
 
@@ -336,8 +336,9 @@ def test_prompt_checkpoint_contains_only_context(config):
     path = checkpoint_path(config, "stub", "mvtec")
     assert os.path.isfile(path)
     state = torch.load(path, map_location="cpu")
-    assert list(state) == ["ctx"]
-    assert state["ctx"].shape == (2, config.n_ctx, EMBED)
+    assert list(state) == ["normal_context", "abnormal_context"]
+    assert state["normal_context"].shape == (config.n_ctx, EMBED)
+    assert state["abnormal_context"].shape == (config.n_ctx, EMBED)
 
 
 def test_resume_skips_completed_shards(config):

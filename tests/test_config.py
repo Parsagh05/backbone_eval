@@ -43,6 +43,13 @@ def test_fingerprint_tracks_settings_that_change_results():
     assert base.fingerprint() != make(epochs=2).fingerprint()
     assert base.fingerprint() != make(learning_rate=1e-4).fingerprint()
     assert base.fingerprint() != make(max_train_images_per_category=20).fingerprint()
+    assert base.fingerprint() != make(
+        fixed_prompt_class_name="object").fingerprint()
+    assert base.fingerprint() != make(
+        learnable_suffix={"normal": "item.",
+                          "anomalous": "damaged item."}).fingerprint()
+    assert base.fingerprint() != make(focal_smooth=1e-4).fingerprint()
+    assert base.fingerprint() != make(grad_clip=1.0).fingerprint()
 
 
 def test_fingerprint_includes_the_code_revision(monkeypatch):
@@ -66,6 +73,8 @@ def test_fingerprint_ignores_settings_that_do_not_change_results():
     {"prompt_modes": ["fixed"]},          # slide 23 needs fixed AND learned
     {"n_ctx": 0},
     {"map_res": 0},
+    {"focal_smooth": 0.5},
+    {"grad_clip": 0.0},
 ])
 def test_invalid_configuration_is_rejected(overrides):
     with pytest.raises(ValueError):

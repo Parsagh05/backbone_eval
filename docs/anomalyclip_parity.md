@@ -20,16 +20,16 @@ remove.
 
 | Aspect | AnomalyCLIP | Here |
 | --- | --- | --- |
-| prompt form | `[X × n] object` / `[X × n] damaged object`, `classnames = ["object"]` | same |
+| prompt form | `[X × n] object.` / `[X × n] damaged object.`, `classnames = ["object"]` | same |
 | `n_ctx` | 12 | 12 |
 | object-agnostic | no class name in the learnable prompt | same |
 | deep text-prompt tuning | present (`compound_prompts_text`, depth 9) | **deliberately absent** |
 | DPAM visual surgery, learnable visual tokens, feature adapters | present | **deliberately absent** |
-| trainable parameters | context vectors (+ deep tokens) | context vectors only, asserted every run |
+| trainable parameters | shallow contexts (+ deep tokens and projections) | two shallow contexts only, asserted every run |
 | dense layers | 6, 12, 18, 24 | same for CLIP |
 | dice | `1 - mean(2·inter + 1)/(sum + sum + 1)` | same |
-| focal | `-(1-pt)^2 · log(pt)` on softmax probabilities, `gamma = 2` | same, with an equivalent epsilon guard |
-| optimiser | Adam, lr 1e-3 | same |
+| focal | `-(1-pt)^2 · log(pt)` on softmax probabilities, `gamma = 2`, `smooth = 1e-5` | same |
+| optimiser | Adam, lr 1e-3 | same constant learning rate; no default gradient clipping |
 
 ## Fixed
 

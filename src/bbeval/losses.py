@@ -9,10 +9,13 @@ from .config import BackboneEvalConfig
 
 
 def focal_loss(probability: torch.Tensor, target: torch.Tensor,
-               gamma: float) -> torch.Tensor:
-    """Multi-class focal loss over {normal, anomalous} at every pixel."""
-    probability = probability.clamp(1e-6, 1.0 - 1e-6)
-    truth = probability.gather(1, target[:, None])[:, 0]
+               gamma: float, smooth: float = 1e-5) -> torch.Tensor:
+    """AnomalyCLIP's focal loss over two-channel pixel probabilities."""
+    one_hot = F.one_hot(target.long(), num_classes=2).permute(0, 3, 1, 2)
+    one_hot = one_hot.to(device=probability.device, dtype=probability.dtype)
+    one_hot = one_hot.clamp(smooth, 1.0 - smooth)
+    truth = (one_hot * probability).sum(dim=1) + smooth
+    truth = truth.clamp_min(smooth)
     return -((1.0 - truth) ** gamma * truth.log()).mean()
 
 
@@ -56,7 +59,8 @@ def prompt_loss(config: BackboneEvalConfig, image_logits: torch.Tensor,
                 # one, so the interpolated map is still a distribution.
                 probability = F.interpolate(probability, size=target.shape[-2:],
                                             mode="bilinear", align_corners=False)
-            pixel = pixel + (focal_loss(probability, target, config.focal_gamma)
+            pixel = pixel + (focal_loss(probability, target, config.focal_gamma,
+                                        config.focal_smooth)
                              + dice_loss(probability[:, 1], truth)
                              + dice_loss(probability[:, 0], 1.0 - truth))
         total = total + config.pixel_loss_weight * pixel

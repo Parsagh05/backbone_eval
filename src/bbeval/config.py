@@ -84,7 +84,8 @@ class BackboneEvalConfig:
     # embeddings of the "X" placeholder tokens.
     init_std: float = 0.02
     learnable_suffix: dict[str, str] = field(
-        default_factory=lambda: {"normal": "object", "anomalous": "damaged object"})
+        default_factory=lambda: {"normal": "object.",
+                                 "anomalous": "damaged object."})
     # None -> use the real category name, which is available zero-shot.
     fixed_prompt_class_name: str | None = None
 
@@ -94,6 +95,7 @@ class BackboneEvalConfig:
     # ablation) and leaves nothing opposing a collapse onto "normal everywhere".
     loss_mode: str = "both"
     focal_gamma: float = 2.0
+    focal_smooth: float = 1e-5
     image_loss_weight: float = 1.0
     pixel_loss_weight: float = 4.0          # AnomalyCLIP's lam
     # AnomalyCLIP's setting. Two epochs was not enough to leave the
@@ -103,7 +105,10 @@ class BackboneEvalConfig:
     learning_rate: float = 1e-3
     adam_betas: tuple[float, float] = (0.5, 0.999)
     weight_decay: float = 0.0
-    grad_clip: float = 1.0
+    # None matches the reference shallow-prompt trainer. A positive value is
+    # retained as an explicit ablation knob rather than silently changing the
+    # default optimisation path.
+    grad_clip: float | None = None
     max_train_images_per_category: int | None = None
 
     # --- corruptions (pptx slides 18/19/21) ----------------------------------
@@ -171,6 +176,10 @@ class BackboneEvalConfig:
             raise ValueError("map_temperature must be positive or None")
         if self.init_std <= 0:
             raise ValueError("init_std must be positive")
+        if not 0 <= self.focal_smooth < 0.5:
+            raise ValueError("focal_smooth must be in [0, 0.5)")
+        if self.grad_clip is not None and self.grad_clip <= 0:
+            raise ValueError("grad_clip must be positive or None")
 
     # --- derived -------------------------------------------------------------
     @property
@@ -207,6 +216,8 @@ class BackboneEvalConfig:
                        else {"shared": self.shared_dense_layers}),
             "value_attention": self.use_value_attention,
             "n_ctx": self.n_ctx,
+            "learnable_suffix": self.learnable_suffix,
+            "fixed_prompt_class_name": self.fixed_prompt_class_name,
             "loss": self.loss_mode,
             "global_token": self.global_token,
             "local_evidence": self.add_local_evidence,
@@ -218,8 +229,13 @@ class BackboneEvalConfig:
             "image_weight": self.image_loss_weight,
             "pixel_weight": self.pixel_loss_weight,
             "focal_gamma": self.focal_gamma,
+            "focal_smooth": self.focal_smooth,
             "map_temperature": self.map_temperature,
             "init_std": self.init_std,
+            "batch_size": self.batch_size,
+            "adam_betas": self.adam_betas,
+            "weight_decay": self.weight_decay,
+            "grad_clip": self.grad_clip,
         }
         blob = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.blake2b(blob.encode(), digest_size=6).hexdigest()
