@@ -24,7 +24,6 @@ from .config import BackboneEvalConfig
 PAIRS = {
     "fixed": ("fixed", "fixed"),
     "learned": ("learned", "learned"),
-    "decoupled": ("fixed", "learned"),
 }
 
 
@@ -105,7 +104,7 @@ def anomaly_outputs(config: BackboneEvalConfig, backbone: Backbone,
                     map_res: int | None = None) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
     """{mode: (scores [B], maps [B,M,M])} for every configured prompt mode.
 
-    All modes come out of a single visual forward pass, so measuring three
+    Both modes come out of a single visual forward pass, so measuring two
     costs almost nothing over measuring one.
     """
     logit_scale = logit_scale_for(config, backbone)

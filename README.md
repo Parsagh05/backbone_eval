@@ -210,8 +210,8 @@ one clean pass over both protocol directions:
 | prompt fitting (15 epochs x both source splits) | ~58,300 |
 | evaluation sweep (MVTec 1,725 + VisA 2,162) | ~3,900 |
 
-All three prompt modes come out of one forward pass, so measuring `fixed`,
-`learned` and `decoupled` costs the same as measuring one.
+Both prompt modes come out of one forward pass, so measuring `fixed` and
+`learned` costs the same as measuring one.
 
 Calibrated against a measured run: **40 minutes** on a Kaggle T4 for both
 backbones at 2 epochs, of which roughly 5-7 was fixed cost (4.4 GB of weight
@@ -265,10 +265,10 @@ contains those two contexts and nothing else, which is the audit trail for the
 claim that no encoder parameter is touched. `assert_prompt_learning_only`
 re-checks this before every fit.
 
-Three prompt modes come out of one visual forward pass: `fixed` (WinCLIP's
+Two prompt modes come out of one visual forward pass: `fixed` (WinCLIP's
 published 22-template Cartesian ensemble with 7 normal and 4 anomalous states,
-using the real category name), `learned`, and `decoupled` (fixed score, learned
-map). The exact frozen vocabulary is pinned by `tests/test_prompts.py`.
+using the real category name) and `learned`. The exact frozen vocabulary is
+pinned by `tests/test_prompts.py`.
 
 **Learned prompts follow the group's shallow AnomalyCLIP-style reference** —
 `[v1…v12] object.` and `[u1…u12] damaged object.`, no class name — trained with

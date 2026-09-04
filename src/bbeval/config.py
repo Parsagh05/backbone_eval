@@ -32,7 +32,7 @@ DEFAULT_DENSE_LAYER_FRACTIONS = {
     "clip": (0.25, 0.5, 0.75, 1.0),
     "siglip2": (1.0,),
 }
-VALID_PROMPT_MODES = ("fixed", "learned", "decoupled")
+VALID_PROMPT_MODES = ("fixed", "learned")
 
 
 @dataclass
@@ -47,7 +47,7 @@ class BackboneEvalConfig:
     backbones: tuple[str, ...] = ("clip", "siglip2")
     protocol: tuple[tuple[str, str], ...] = DEFAULT_PROTOCOL
     categories: dict[str, tuple[str, ...]] | None = None
-    prompt_modes: tuple[str, ...] = ("fixed", "learned", "decoupled")
+    prompt_modes: tuple[str, ...] = ("fixed", "learned")
 
     # --- backbone selection --------------------------------------------------
     clip_backbone: str = "ViT-L/14@336px"
