@@ -91,3 +91,32 @@ def test_learnable_defaults_match_the_shallow_reference_repository():
     assert config.init_std == 0.02
     assert config.map_temperature == 0.07
     assert config.grad_clip is None
+
+
+def test_agnostic_variant_never_mentions_the_category():
+    """`fixed_agnostic` labels every category "object", as the reference does."""
+    from bbeval.prompts import AGNOSTIC_CLASS_NAME
+
+    config = make_config()
+    for category in ("hazelnut", "metal_nut", "pcb1"):
+        normal, anomalous = fixed_prompt_texts(config, category,
+                                               class_name=AGNOSTIC_CLASS_NAME)
+        joined = " ".join(normal + anomalous)
+        assert prompt_class_name(category) not in joined or category == "object"
+        assert "object" in joined
+    # Category-independent, which is why the sweep builds it once per backbone.
+    assert (fixed_prompt_texts(config, "hazelnut", class_name=AGNOSTIC_CLASS_NAME)
+            == fixed_prompt_texts(config, "pcb1", class_name=AGNOSTIC_CLASS_NAME))
+
+
+def test_agnostic_and_class_aware_variants_differ():
+    from bbeval.prompts import AGNOSTIC_CLASS_NAME
+
+    config = make_config()
+    aware = fixed_prompt_texts(config, "hazelnut")
+    agnostic = fixed_prompt_texts(config, "hazelnut", class_name=AGNOSTIC_CLASS_NAME)
+    assert aware != agnostic
+    assert aware[0][0] == "a cropped photo of the hazelnut."
+    assert agnostic[0][0] == "a cropped photo of the object."
+    # Same ensemble size either way: only the label changes.
+    assert [len(x) for x in aware] == [len(x) for x in agnostic]

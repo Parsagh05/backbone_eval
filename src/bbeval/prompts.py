@@ -45,11 +45,21 @@ NORMAL_STATES = ("{}", "flawless {}", "perfect {}", "unblemished {}",
                  "{} without flaw", "{} without defect", "{} without damage")
 ANOMALOUS_STATES = ("damaged {}", "{} with flaw", "{} with defect",
                     "{} with damage")
+# The label used by the class-agnostic frozen variant, matching the reference
+# setup's CLASSNAME. Nothing about the category reaches the prompt.
+AGNOSTIC_CLASS_NAME = "object"
 
 
-def fixed_prompt_texts(config: BackboneEvalConfig,
-                       category: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    name = config.fixed_prompt_class_name or prompt_class_name(category)
+def fixed_prompt_texts(config: BackboneEvalConfig, category: str,
+                       class_name: str | None = None,
+                       ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The frozen ensemble for one category.
+
+    `class_name` overrides the label that fills every template. Passing
+    `AGNOSTIC_CLASS_NAME` gives the class-agnostic variant, where no category
+    knowledge reaches the prompt.
+    """
+    name = class_name or config.fixed_prompt_class_name or prompt_class_name(category)
     return tuple(
         tuple(template.format(state.format(name))
               for state in states for template in FIXED_TEMPLATES)
@@ -58,10 +68,10 @@ def fixed_prompt_texts(config: BackboneEvalConfig,
 
 @torch.no_grad()
 def build_fixed_text(config: BackboneEvalConfig, backbone: Backbone,
-                     category: str) -> torch.Tensor:
+                     category: str, class_name: str | None = None) -> torch.Tensor:
     """Two prototypes: the mean unit embedding of each state's prompt ensemble."""
     prototypes = []
-    for texts in fixed_prompt_texts(config, category):
+    for texts in fixed_prompt_texts(config, category, class_name):
         embeddings = F.normalize(backbone.encode_fixed_text(list(texts)).float(), dim=-1)
         prototypes.append(F.normalize(embeddings.mean(dim=0), dim=-1))
     return torch.stack(prototypes)                       # [2, D]

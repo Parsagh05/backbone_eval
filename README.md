@@ -210,8 +210,8 @@ one clean pass over both protocol directions:
 | prompt fitting (15 epochs x both source splits) | ~58,300 |
 | evaluation sweep (MVTec 1,725 + VisA 2,162) | ~3,900 |
 
-Both prompt modes come out of one forward pass, so measuring `fixed` and
-`learned` costs the same as measuring one.
+All three prompt modes come out of one forward pass, so measuring `fixed`,
+`fixed_agnostic` and `learned` costs the same as measuring one.
 
 Calibrated against a measured run: **40 minutes** on a Kaggle T4 for both
 backbones at 2 epochs, of which roughly 5-7 was fixed cost (4.4 GB of weight
@@ -265,10 +265,25 @@ contains those two contexts and nothing else, which is the audit trail for the
 claim that no encoder parameter is touched. `assert_prompt_learning_only`
 re-checks this before every fit.
 
-Two prompt modes come out of one visual forward pass: `fixed` (WinCLIP's
-published 22-template Cartesian ensemble with 7 normal and 4 anomalous states,
-using the real category name) and `learned`. The exact frozen vocabulary is
-pinned by `tests/test_prompts.py`.
+Three prompt modes come out of one visual forward pass:
+
+| Mode | Text | Category name |
+| --- | --- | --- |
+| `fixed` | WinCLIP's 22-template x (7 normal, 4 anomalous) ensemble | **yes** — `"a cropped photo of the hazelnut."` |
+| `fixed_agnostic` | the same ensemble | **no** — `"a cropped photo of the object."` |
+| `learned` | 12 trained context vectors + fixed suffix | **no** |
+
+The exact frozen vocabulary is pinned by `tests/test_prompts.py`.
+
+`fixed` and `fixed_agnostic` differ *only* in the label that fills the template,
+which makes the pair a direct measurement of **how much knowing the category is
+worth**. It also matters for reading `fixed` against `learned`: the learned
+prompts are object-agnostic by construction, so comparing them with class-aware
+`fixed` changes two things at once. `fixed_agnostic` is the like-for-like
+comparison, isolating the effect of training alone.
+
+Being category-independent, the agnostic ensemble is encoded once per backbone
+rather than once per category.
 
 **Learned prompts follow the group's shallow AnomalyCLIP-style reference** —
 `[v1…v12] object.` and `[u1…u12] damaged object.`, no class name — trained with

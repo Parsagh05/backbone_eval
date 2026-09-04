@@ -23,6 +23,7 @@ from .config import BackboneEvalConfig
 
 PAIRS = {
     "fixed": ("fixed", "fixed"),
+    "fixed_agnostic": ("fixed_agnostic", "fixed_agnostic"),
     "learned": ("learned", "learned"),
 }
 
