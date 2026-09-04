@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import os
 
-import numpy as np
 import pandas as pd
 
 from .artifacts import load_ground_truth, load_shard
 from .config import BackboneEvalConfig
 from .corruptions import corruption_grid, corruption_group_of
 from .datasets import categories_for
-from .metrics import ALL_METRICS, evaluate_shard, image_metrics
+from .metrics import ALL_METRICS, evaluate_shard
 
 
 def collect_category_table(config: BackboneEvalConfig,
@@ -47,24 +46,7 @@ def collect_category_table(config: BackboneEvalConfig,
     return pd.DataFrame(rows)
 
 
-def pooled_image_metrics(config: BackboneEvalConfig, backbone_name: str,
-                         prompt_mode: str, dataset: str, corruption: str,
-                         severity: int) -> dict[str, float]:
-    """Image metrics over every image of a dataset at once, not per category."""
-    labels, scores = [], []
-    for category in categories_for(config, dataset):
-        shard = load_shard(config, backbone_name, prompt_mode, dataset, category,
-                           corruption, severity)
-        if shard is None:
-            return {}
-        labels.append(shard["labels"])
-        scores.append(shard["scores"])
-    metrics = image_metrics(np.concatenate(labels), np.concatenate(scores))
-    return {f"{key}_pooled": value for key, value in metrics.items()}
-
-
-def build_dataset_table(config: BackboneEvalConfig,
-                        category_table: pd.DataFrame) -> pd.DataFrame:
+def build_dataset_table(category_table: pd.DataFrame) -> pd.DataFrame:
     """Dataset-level = unweighted mean over categories, as in AnomalyCLIP."""
     if category_table.empty:
         return category_table
@@ -73,10 +55,7 @@ def build_dataset_table(config: BackboneEvalConfig,
                   .mean().reset_index())
     aggregated["n_categories"] = (category_table.groupby(keys, dropna=False)["category"]
                                   .nunique().values)
-    pooled = [pooled_image_metrics(config, row.backbone, row.prompt_mode, row.dataset,
-                                   row.corruption, row.severity)
-              for row in aggregated.itertuples()]
-    return pd.concat([aggregated, pd.DataFrame(pooled)], axis=1)
+    return aggregated
 
 
 def build_robustness_table(dataset_table: pd.DataFrame) -> pd.DataFrame:

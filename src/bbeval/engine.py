@@ -148,7 +148,7 @@ def run_evaluation(config: BackboneEvalConfig, verbose: bool = True) -> dict:
     run_sweep(config, backbones=backbones, verbose=verbose)
 
     category_table = collect_category_table(config, verbose)
-    dataset_table = build_dataset_table(config, category_table)
+    dataset_table = build_dataset_table(category_table)
     tables = {"category": category_table, "dataset": dataset_table,
               "robustness": build_robustness_table(dataset_table)}
     paths = save_tables(config, tables)

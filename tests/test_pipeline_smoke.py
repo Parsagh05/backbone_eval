@@ -325,10 +325,11 @@ def test_metrics_are_finite_and_in_range(result, config):
 
 def test_dataset_table_aggregates_over_categories(config):
     category_table = collect_category_table(config, verbose=False)
-    dataset_table = build_dataset_table(config, category_table)
+    dataset_table = build_dataset_table(category_table)
     assert not dataset_table.empty
     assert (dataset_table["n_categories"] == 1).all()
-    assert "image_auroc_pooled" in dataset_table.columns
+    # Pooled columns were dropped: only per-category metrics are averaged.
+    assert not [c for c in dataset_table.columns if c.endswith("_pooled")]
 
 
 def test_prompt_checkpoint_contains_only_context(config):
