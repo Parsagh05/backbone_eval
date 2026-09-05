@@ -13,9 +13,9 @@ not specify now follows the official `zqhang/AnomalyCLIP` implementation.
 | object-agnostic prompts | yes | same |
 | deep text-prompt tuning | yes | **deliberately absent per Alireza** |
 | trainable shallow tensors | normal and abnormal contexts | same; encoders frozen and asserted |
-| inference visual stages | 6, 12, 18, 24 | same for `clip`; final layer 24 for `clip_standard` and SigLIP2 |
+| inference visual stages | 6, 12, 18, 24 | same for `clip`; final layer 24 for `clip_standard` and both SigLIP2 controls |
 | CLIP dense visual path | DPAM V-V attention, starting at layer 6 | same for `clip`; deliberately absent from `clip_standard` |
-| SigLIP2 dense visual path | not applicable | native `map_token` projection at final layer 24 |
+| SigLIP2 dense visual path | not applicable | native `map_token` projection at final layer 24; native 24×24 and interpolated 37×37 variants |
 | training objective | image CE + `4 × Σ_layers(focal + dice_abnormal + dice_normal)` | same loss terms; final layer only for both backbones |
 | similarity temperature | 0.07 | same |
 | inference anomaly map | softmax per layer, resize, sum layers | same |
@@ -36,7 +36,10 @@ official four-stage DPAM inference map. `clip_standard` is the explicit
 non-DPAM control: it uses the ordinary final CLIP block and the standard
 `ln_post @ visual.proj` projection at layer 24 only. SigLIP2 has no literal
 DPAM module and uses the final encoder output through its native attention-pool
-(`map_token`) projection.
+(`map_token`) projection. `siglip2` retains the checkpoint-native 384px/24×24
+grid. `siglip2_grid37` keeps the same weights and projection but interpolates
+the positional grid for 592px/37×37, matching the patch count of 518px
+patch-14 CLIP.
 
 During shallow-prompt fitting, `pixel_loss_layers="last"` supervises only the
 final selected layer for both backbones. CLIP and SigLIP2 therefore receive one
@@ -76,7 +79,7 @@ explicit storage/runtime ablation and must be labelled accordingly.
 
 ## Reproducibility
 
-The package version is part of the configuration fingerprint. Version 0.9.0
+The package version is part of the configuration fingerprint. Version 0.10.0
 therefore cannot resume incompatible older artifacts or prompt
 checkpoints. Existing result directories remain historical records rather than
 being overwritten.

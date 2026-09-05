@@ -16,7 +16,10 @@ open_clip = pytest.importorskip("open_clip")
 
 import torch.nn.functional as F  # noqa: E402
 
-from bbeval.backbones.siglip2 import SigLip2Backbone  # noqa: E402
+from bbeval.backbones.siglip2 import (  # noqa: E402
+    SigLip2Backbone,
+    SigLip2Grid37Backbone,
+)
 from bbeval.config import BackboneEvalConfig  # noqa: E402
 
 ARCH = "ViT-B-16-SigLIP2"
@@ -40,7 +43,8 @@ def make_config(tmp_path_factory, readout="map_token") -> BackboneEvalConfig:
         mvtec_root=str(root / "mvtec"), visa_root=str(root / "visa"),
         output_root=str(root / "out"), device="cpu", n_ctx=8,
         siglip2_model=MODEL_ID, siglip2_dense_readout=readout,
-        dense_layer_fractions={"siglip2": (1.0,)})
+        dense_layer_fractions={"siglip2": (1.0,),
+                               "siglip2_grid37": (1.0,)})
 
 
 def build_backbone(monkeypatch, shared_model, config) -> SigLip2Backbone:
@@ -64,6 +68,34 @@ def test_uses_native_resolution_not_shared_input_size(backbone):
     assert backbone.image_size == 224      # not the shared input_size of 518
     assert backbone.grid == 14
     assert backbone.image_size % backbone.patch_size == 0
+
+
+def test_grid37_variant_forces_37_patches_and_interpolates_positions(
+        monkeypatch, tmp_path_factory):
+    # Use a smaller non-native grid for the CPU forward, while separately
+    # pinning the production class constant to the required 37.
+    assert SigLip2Grid37Backbone.forced_patch_grid == 37
+    model = open_clip.create_model(ARCH, pretrained=None).eval()
+    model.requires_grad_(False)
+    monkeypatch.setattr(open_clip, "create_model_from_pretrained",
+                        lambda *a, **k: (model, None))
+    monkeypatch.setattr(SigLip2Grid37Backbone, "forced_patch_grid", 16)
+    variant = SigLip2Grid37Backbone(make_config(tmp_path_factory))
+
+    assert variant.native_image_size == 224
+    assert variant.image_size == 256
+    assert variant.grid == 16
+    assert variant.layers == (variant.depth,)
+    assert variant.describe()["positional_embedding_interpolated"] is True
+
+    image = torch.randn(1, 3, variant.image_size, variant.image_size)
+    with torch.no_grad():
+        features = variant.encode(image)
+    dense = features["dense"][variant.depth]
+    assert dense.shape == (1, 16, 16, variant.embed_dim)
+    assert features["object"].shape == (1, variant.embed_dim)
+    assert torch.isfinite(dense).all()
+    assert torch.isfinite(features["object"]).all()
 
 
 # --- D4: logit_bias ----------------------------------------------------------

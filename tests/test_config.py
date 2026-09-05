@@ -40,7 +40,9 @@ def test_defaults_follow_anomalyclip_evaluation_protocol():
     assert config.dense_layer_fractions["clip"] == (0.25, 0.5, 0.75, 1.0)
     assert config.dense_layer_fractions["clip_standard"] == (1.0,)
     assert config.dense_layer_fractions["siglip2"] == (1.0,)
-    assert config.backbones == ("clip", "clip_standard", "siglip2")
+    assert config.dense_layer_fractions["siglip2_grid37"] == (1.0,)
+    assert config.backbones == (
+        "clip", "clip_standard", "siglip2", "siglip2_grid37")
     assert config.pixel_loss_layers == "last"
 
 

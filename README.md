@@ -52,7 +52,7 @@ results, so a reader can audit the choices.
 
 ## Dense visual readout
 
-Three named backbones make the visual-path difference explicit:
+Four named backbones make the visual-path and grid differences explicit:
 
 - `clip` uses AnomalyCLIP's DPAM V-V branch and sums maps from layers
   6, 12, 18 and 24.
@@ -60,6 +60,8 @@ Three named backbones make the visual-path difference explicit:
   `ln_post @ visual.proj` patch projection, and layer 24 only. It cannot enable
   DPAM even when `use_value_attention=true` globally.
 - `siglip2` uses its native attention-pool projection at layer 24.
+- `siglip2_grid37` uses the same frozen SigLIP2 model and layer-24 readout,
+  but interpolates its positional grid for a 592px input: 592 / 16 = 37.
 
 The selected readout and layers are recorded in every run manifest.
 
@@ -74,7 +76,10 @@ adding or training parameters. The historical configuration name
 SigLIP2 has no literal DPAM module. Its standard output comes from the final
 encoder state through the model's own attention-pool projection, so this
 benchmark reads SigLIP2 layer 24. The global embedding is identical between
-`clip` and `clip_standard`; only their dense localization path differs.
+`clip` and `clip_standard`; only their dense localization path differs. The two
+SigLIP2 variants likewise share weights and readout: `siglip2` is the native
+384px/24×24 control, while `siglip2_grid37` isolates the effect of matching
+CLIP's 37×37 patch grid.
 
 ## The variable under test
 
@@ -113,7 +118,7 @@ from bbeval import BackboneEvalConfig, run_evaluation
 
 result = run_evaluation(BackboneEvalConfig(
     mvtec_root=..., visa_root=..., output_root=...,
-    backbones=("clip", "clip_standard", "siglip2"),
+    backbones=("clip", "clip_standard", "siglip2", "siglip2_grid37"),
     siglip2_dense_readout="map_token",
 ))
 ```
@@ -212,10 +217,10 @@ default leaves backbone-forward time similar but makes artifact I/O and the
 assuming the old wall-clock estimate.
 
 Prompt fitting dominates: at 15 epochs it is about 58,000 forward passes per
-backbone against 3,900 for the evaluation sweep. Enabling `clip_standard` adds
-one full CLIP prompt-fitting/evaluation run; it is a separate learned-prompt
-control, not an extra output from the DPAM forward pass. Two levers if that does
-not fit a session:
+backbone against 3,900 for the evaluation sweep. Each additional named control
+adds its own prompt-fitting/evaluation run. In particular, `siglip2_grid37` is
+more expensive than native SigLIP2 because attention sees 1,369 rather than 576
+patch tokens. Two levers if that does not fit a session:
 
 - `resume=True` (the default) — prompt checkpoints are written per
   (backbone, source) and shards per cell, so a run continues across sessions.
@@ -339,7 +344,7 @@ src/bbeval/
   backbones/      registry + the frozen-encoder interface
     base.py       the contract, and what each backbone must declare
     clip.py       DPAM CLIP + standard final-layer CLIP control
-    siglip2.py    SigLIP2 via OpenCLIP/timm
+    siglip2.py    native SigLIP2 + equal-37×37-grid control
   prompts.py      fixed ensembles + the learnable context
   scoring.py      patch/text logits, anomaly maps, image scores
   losses.py       focal + dice + cross-entropy

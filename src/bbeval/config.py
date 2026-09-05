@@ -38,6 +38,8 @@ DEFAULT_DENSE_LAYER_FRACTIONS = {
     # attention-pooling head. Its paper does not prescribe AnomalyCLIP's four
     # intermediate stages for anomaly localisation.
     "siglip2": (1.0,),
+    # Same SigLIP2 weights/readout, resized to 592px for a 37x37 patch grid.
+    "siglip2_grid37": (1.0,),
 }
 # Frozen vocabularies, defined in prompts.py and mirrored here so the config can
 # validate without importing it. prompts.py asserts the two agree.
@@ -55,7 +57,8 @@ class BackboneEvalConfig:
     weights_dir: str | None = None
 
     # --- what to run ---------------------------------------------------------
-    backbones: tuple[str, ...] = ("clip", "clip_standard", "siglip2")
+    backbones: tuple[str, ...] = (
+        "clip", "clip_standard", "siglip2", "siglip2_grid37")
     protocol: tuple[tuple[str, str], ...] = DEFAULT_PROTOCOL
     categories: dict[str, tuple[str, ...]] | None = None
     prompt_modes: tuple[str, ...] = (

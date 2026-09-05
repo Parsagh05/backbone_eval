@@ -29,6 +29,7 @@ try:
 except Exception as _open_clip_error:  # noqa: BLE001
     open_clip = None
     skip_backbone("siglip2", _open_clip_error)
+    skip_backbone("siglip2_grid37", _open_clip_error)
 
 SIGLIP2_MEAN = (0.5, 0.5, 0.5)
 SIGLIP2_STD = (0.5, 0.5, 0.5)
@@ -64,6 +65,7 @@ class SigLip2Backbone(Backbone):
 
     name = "siglip2"
     has_two_global_tokens = False
+    forced_patch_grid: int | None = None
 
     def __init__(self, config: BackboneEvalConfig) -> None:
         if open_clip is None:
@@ -87,15 +89,23 @@ class SigLip2Backbone(Backbone):
 
         self.visual = self.model.visual
         self.patch_size = self._infer_patch_size()
-        # SigLIP2 checkpoints are resolution-specific: off-native input forces
-        # positional-embedding resampling, and the shared 518 is not even a
-        # whole number of 16-pixel patches. Default to the checkpoint's size.
-        self.image_size = int(config.siglip2_input_size or self._native_image_size())
+        self.native_image_size = self._native_image_size()
+        # The ordinary variant stays checkpoint-native. `siglip2_grid37`
+        # intentionally uses 37 * patch_size (592 for L/16) and exercises the
+        # explicit positional-interpolation path below.
+        requested_size = (self.forced_patch_grid * self.patch_size
+                          if self.forced_patch_grid is not None
+                          else config.siglip2_input_size)
+        self.image_size = int(requested_size or self.native_image_size)
         if self.image_size % self.patch_size:
             raise ValueError(
                 f"SigLIP2 image size {self.image_size} is not a multiple of "
                 f"patch size {self.patch_size}")
         self.grid = self.image_size // self.patch_size
+        if self.image_size != self.native_image_size:
+            patch_embed = self.visual.trunk.patch_embed
+            if hasattr(patch_embed, "strict_img_size"):
+                patch_embed.strict_img_size = False
 
         modules = _text_modules(self.model)
         self._tok_emb = modules["token_embedding"]
@@ -157,6 +167,9 @@ class SigLip2Backbone(Backbone):
         return {**super().describe(),
                 "model_id": self.model_id,
                 "dense_readout": self.dense_readout,
+                "native_image_size": self.native_image_size,
+                "positional_embedding_interpolated": (
+                    self.image_size != self.native_image_size),
                 "logit_bias": self.logit_bias}
 
     # --- vision --------------------------------------------------------------
@@ -185,15 +198,52 @@ class SigLip2Backbone(Backbone):
         pooled = self.visual.head(pooled)
         return pooled.reshape(batch, length, -1)
 
+    def _project_token_set(self, tokens: torch.Tensor) -> torch.Tensor:
+        """The checkpoint's native full-set MAP head, without another trunk pass."""
+        trunk = self.visual.trunk
+        pooled = trunk.attn_pool(trunk.norm(tokens))
+        pooled = trunk.head(trunk.head_drop(trunk.fc_norm(pooled)))
+        return self.visual.head(pooled)
+
+    def _interpolate_position_embedding(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Add the checkpoint position grid after bicubic grid interpolation."""
+        trunk = self.visual.trunk
+        if int(getattr(trunk, "num_prefix_tokens", 0)) != 0:
+            raise ValueError("SigLIP2 grid interpolation expects no prefix tokens")
+        position = getattr(trunk, "pos_embed", None)
+        if position is None or position.ndim != 3:
+            raise ValueError("SigLIP2 grid interpolation needs a [1,N,D] pos_embed")
+
+        source = int(round(position.shape[1] ** 0.5))
+        target = int(round(tokens.shape[1] ** 0.5))
+        if source * source != position.shape[1] or target * target != tokens.shape[1]:
+            raise ValueError("SigLIP2 positional tokens must form square patch grids")
+        if source != target:
+            position = position.float().reshape(1, source, source, -1)
+            position = position.permute(0, 3, 1, 2)
+            position = F.interpolate(position, size=(target, target), mode="bicubic",
+                                     align_corners=False, antialias=True)
+            position = position.permute(0, 2, 3, 1).reshape(1, target * target, -1)
+        return tokens + position.to(device=tokens.device, dtype=tokens.dtype)
+
     def encode(self, x: torch.Tensor) -> dict[str, Any]:
         trunk = self.visual.trunk
         tokens = trunk.patch_embed(x)
-        if hasattr(trunk, "_pos_embed"):
+        off_native = self.image_size != self.native_image_size
+        if off_native:
+            tokens = self._interpolate_position_embedding(tokens)
+            if hasattr(trunk, "pos_drop"):
+                tokens = trunk.pos_drop(tokens)
+        elif hasattr(trunk, "_pos_embed"):
             tokens = trunk._pos_embed(tokens)
         elif hasattr(trunk, "pos_embed"):
             tokens = tokens + trunk.pos_embed
-        if hasattr(trunk, "pos_drop"):
+        if not hasattr(trunk, "_pos_embed") and not off_native and hasattr(trunk, "pos_drop"):
             tokens = trunk.pos_drop(tokens)
+        if hasattr(trunk, "patch_drop"):
+            tokens = trunk.patch_drop(tokens)
+        if hasattr(trunk, "norm_pre"):
+            tokens = trunk.norm_pre(tokens)
         prefix = int(getattr(trunk, "num_prefix_tokens", 0))
 
         dense = {}
@@ -202,9 +252,11 @@ class SigLip2Backbone(Backbone):
             if depth in self.layers:
                 dense[depth] = tokens[:, prefix:]
 
-        # NOTE: this re-runs the visual trunk. Kept so the global embedding is by
-        # construction the model's own; collapsing it is a separate optimisation.
-        global_embedding = self.model.encode_image(x)
+        # At native resolution, use the model's own complete image forward.
+        # Off-native, its fixed positional grid cannot be called directly, so
+        # apply the exact same frozen MAP/head chain to our interpolated tokens.
+        global_embedding = (self._project_token_set(tokens) if off_native
+                            else self.model.encode_image(x))
         if global_embedding.ndim > 2:
             global_embedding = global_embedding.mean(dim=1)
 
@@ -267,5 +319,13 @@ class SigLip2Backbone(Backbone):
         return self._forward_text(self._tok_emb(tokenized))
 
 
+class SigLip2Grid37Backbone(SigLip2Backbone):
+    """SigLIP2 control resized so patch-16 produces the shared 37x37 grid."""
+
+    name = "siglip2_grid37"
+    forced_patch_grid = 37
+
+
 if open_clip is not None:
     register_backbone("siglip2")(SigLip2Backbone)
+    register_backbone("siglip2_grid37")(SigLip2Grid37Backbone)
