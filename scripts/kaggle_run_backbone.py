@@ -16,7 +16,8 @@ VISA_INPUT = "/kaggle/input/datasets/alirezasalehy/visa-ad/VisA_20220922"
 OUTPUT_ROOT = "/kaggle/working/results"
 WEIGHTS_DIR = "/kaggle/working/weights"
 
-BACKBONES = ("clip", "clip_standard", "siglip2", "siglip2_grid37")
+BACKBONES = ("clip_standard", "siglip2_grid37")
+PROMPT_MODES = ("fixed", "learned")
 SIGLIP2_DENSE_READOUT = "map_token"   # "raw" reproduces the published control
 CORRUPTIONS_ENABLED = False           # clean-only for the backbone comparison
 LIMIT = None                          # e.g. 8 for a smoke test
@@ -31,6 +32,7 @@ def build_config() -> dict:
         "output_root": OUTPUT_ROOT,
         "weights_dir": WEIGHTS_DIR,
         "backbones": list(BACKBONES),
+        "prompt_modes": list(PROMPT_MODES),
         "siglip2_dense_readout": SIGLIP2_DENSE_READOUT,
         "corruptions_enabled": CORRUPTIONS_ENABLED,
         "limit": LIMIT,

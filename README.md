@@ -118,7 +118,8 @@ from bbeval import BackboneEvalConfig, run_evaluation
 
 result = run_evaluation(BackboneEvalConfig(
     mvtec_root=..., visa_root=..., output_root=...,
-    backbones=("clip", "clip_standard", "siglip2", "siglip2_grid37"),
+    backbones=("clip_standard", "siglip2_grid37"),
+    prompt_modes=("fixed", "learned"),
     siglip2_dense_readout="map_token",
 ))
 ```
