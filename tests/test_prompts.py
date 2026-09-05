@@ -164,3 +164,30 @@ def test_frozen_modes_differ_only_where_intended():
             .endswith("hazelnut."))
     assert (fixed_prompt_texts(config, "hazelnut", "fixed_compact")[0][0]
             .endswith("hazelnut."))
+
+
+def test_compact_labels_reproduce_the_cae0b9678540_run():
+    """`fixed_compact` must match that run's prompts, not merely its templates.
+
+    The commit that introduced the WinCLIP ensemble also dropped a category-name
+    mapping, so six VisA categories would otherwise be labelled differently and
+    the comparison would confound two changes.
+    """
+    from bbeval.prompts import COMPACT_CLASS_NAMES
+
+    config = make_config()
+    expected = {
+        "pcb1": "printed circuit board", "pcb2": "printed circuit board",
+        "pcb3": "printed circuit board", "pcb4": "printed circuit board",
+        "macaroni1": "macaroni", "macaroni2": "macaroni",
+        "metal_nut": "metal nut", "pipe_fryum": "pipe fryum",
+    }
+    assert COMPACT_CLASS_NAMES == expected
+    for category, label in expected.items():
+        normal, _ = fixed_prompt_texts(config, category, "fixed_compact")
+        assert normal[0] == f"a photo of a {label}."
+    # Categories outside the map keep the plain underscore strip.
+    assert (fixed_prompt_texts(config, "hazelnut", "fixed_compact")[0][0]
+            == "a photo of a hazelnut.")
+    # The mapping belongs to fixed_compact alone: the WinCLIP modes do not use it.
+    assert fixed_prompt_texts(config, "pcb1", "fixed")[0][0].endswith("pcb1.")

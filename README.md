@@ -277,13 +277,13 @@ Three prompt modes come out of one visual forward pass:
 The three frozen modes vary one thing each, so each pair isolates a factor:
 `fixed` vs `fixed_agnostic` measures what the **category name** is worth, and
 `fixed` vs `fixed_compact` measures what the **ensemble size** is worth.
-`fixed_compact` is the vocabulary used up to run `cae0b9678540`; retaining it
-attributes the jump that followed (CLIP +8.7 pixel AUROC, SigLIP2 +0.8) to the
-ensemble rather than to the other changes in the same commit. It reproduces
-that run's frozen scores on **MVTec** but not on **VisA**, where the same commit
-also dropped a category-name mapping: `pcb1`-`pcb4` were `"printed circuit
-board"` and `macaroni1`/`macaroni2` were `"macaroni"`, and are now their raw
-category names.
+`fixed_compact` reproduces run `cae0b9678540` exactly — verified prompt by
+prompt across all 27 categories of both datasets. That commit changed two
+things at once: the ensemble, and a category-name mapping where `pcb1`-`pcb4`
+were `"printed circuit board"` and `macaroni1`/`macaroni2` were `"macaroni"`.
+Both belong to `fixed_compact`, so the mode is a faithful control rather than a
+partial one, and the jump that followed (CLIP +8.7 pixel AUROC, SigLIP2 +0.8)
+can be attributed to the frozen vocabulary as a whole.
 
 Select which modes to run with `prompt_modes`. Shards are stored per mode and
 `resume` merges them, so a run may cover part of the protocol and a later run

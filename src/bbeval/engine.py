@@ -103,8 +103,9 @@ def run_sweep(config: BackboneEvalConfig, backbones: dict[str, Backbone] | None 
         # A class-agnostic ensemble never mentions the category, so it is the
         # same for all of them: build those once per backbone.
         static_text = {mode: build_fixed_text(config, backbone, "", mode=mode)
-                       for mode in frozen if FIXED_MODES[mode][1] is not None}
-        per_category = [mode for mode in frozen if FIXED_MODES[mode][1] is None]
+                       for mode in frozen if not FIXED_MODES[mode].category_dependent}
+        per_category = [mode for mode in frozen
+                        if FIXED_MODES[mode].category_dependent]
 
         current_key, category_text = None, {}
         for item in plan:

@@ -9,6 +9,7 @@ is the audit trail for the claim that no encoder parameter is touched.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import NamedTuple
 
 import torch
@@ -87,11 +88,37 @@ COMPACT_ENSEMBLE = PromptEnsemble(
 # CLASSNAME. Nothing about the category reaches the prompt.
 AGNOSTIC_CLASS_NAME = "object"
 
-# Frozen prompt modes: which ensemble, and whether the category name is used.
-FIXED_MODES: dict[str, tuple[PromptEnsemble, str | None]] = {
-    "fixed": (WINCLIP_ENSEMBLE, None),
-    "fixed_agnostic": (WINCLIP_ENSEMBLE, AGNOSTIC_CLASS_NAME),
-    "fixed_compact": (COMPACT_ENSEMBLE, None),
+# Category labels used alongside the compact ensemble up to run `cae0b9678540`,
+# where several VisA identifiers were replaced by the object they name. Kept
+# with that ensemble so `fixed_compact` reproduces the run exactly rather than
+# differing on six VisA categories.
+COMPACT_CLASS_NAMES = {
+    "metal_nut": "metal nut", "pipe_fryum": "pipe fryum",
+    "pcb1": "printed circuit board", "pcb2": "printed circuit board",
+    "pcb3": "printed circuit board", "pcb4": "printed circuit board",
+    "macaroni1": "macaroni", "macaroni2": "macaroni",
+}
+
+
+class FixedMode(NamedTuple):
+    """One frozen prompt mode: a vocabulary plus how the label is chosen."""
+
+    ensemble: PromptEnsemble
+    label: Callable[[str], str]
+    # False when the label ignores the category, so the sweep can encode the
+    # ensemble once per backbone instead of once per category.
+    category_dependent: bool
+
+
+FIXED_MODES: dict[str, FixedMode] = {
+    "fixed": FixedMode(WINCLIP_ENSEMBLE, prompt_class_name, True),
+    "fixed_agnostic": FixedMode(WINCLIP_ENSEMBLE,
+                                lambda _category: AGNOSTIC_CLASS_NAME, False),
+    "fixed_compact": FixedMode(
+        COMPACT_ENSEMBLE,
+        lambda category: COMPACT_CLASS_NAMES.get(category,
+                                                 prompt_class_name(category)),
+        True),
 }
 
 assert tuple(FIXED_MODES) == FROZEN_PROMPT_MODES, (
@@ -111,10 +138,9 @@ def fixed_prompt_texts(config: BackboneEvalConfig, category: str,
     `class_name` overrides the label that fills every template, whatever the
     mode would otherwise use.
     """
-    ensemble, mode_class_name = FIXED_MODES[mode]
-    name = (class_name or mode_class_name or config.fixed_prompt_class_name
-            or prompt_class_name(category))
-    return ensemble.texts(name)
+    spec = FIXED_MODES[mode]
+    name = class_name or config.fixed_prompt_class_name or spec.label(category)
+    return spec.ensemble.texts(name)
 
 
 @torch.no_grad()
