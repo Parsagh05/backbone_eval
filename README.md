@@ -279,7 +279,15 @@ The three frozen modes vary one thing each, so each pair isolates a factor:
 `fixed` vs `fixed_compact` measures what the **ensemble size** is worth.
 `fixed_compact` is the vocabulary used up to run `cae0b9678540`; retaining it
 attributes the jump that followed (CLIP +8.7 pixel AUROC, SigLIP2 +0.8) to the
-ensemble rather than to the other changes in the same commit.
+ensemble rather than to the other changes in the same commit. It reproduces
+that run's frozen scores on **MVTec** but not on **VisA**, where the same commit
+also dropped a category-name mapping: `pcb1`-`pcb4` were `"printed circuit
+board"` and `macaroni1`/`macaroni2` were `"macaroni"`, and are now their raw
+category names.
+
+Select which modes to run with `prompt_modes`. Any frozen vocabulary satisfies
+the frozen half of slide 23, so `("fixed_compact", "learned")` is a valid run;
+only dropping *all* frozen modes, or `learned`, is rejected.
 
 The exact frozen vocabulary is pinned by `tests/test_prompts.py`.
 

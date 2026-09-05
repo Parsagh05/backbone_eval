@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .backbones import Backbone
-from .config import BackboneEvalConfig
+from .config import FROZEN_PROMPT_MODES, BackboneEvalConfig
 from .datasets import prompt_class_name
 
 class PromptEnsemble(NamedTuple):
@@ -93,6 +93,9 @@ FIXED_MODES: dict[str, tuple[PromptEnsemble, str | None]] = {
     "fixed_agnostic": (WINCLIP_ENSEMBLE, AGNOSTIC_CLASS_NAME),
     "fixed_compact": (COMPACT_ENSEMBLE, None),
 }
+
+assert tuple(FIXED_MODES) == FROZEN_PROMPT_MODES, (
+    "config.FROZEN_PROMPT_MODES must list exactly the frozen modes defined here")
 
 # Kept as names: tests/test_prompts.py pins this vocabulary against WinCLIP.
 FIXED_TEMPLATES = WINCLIP_ENSEMBLE.templates

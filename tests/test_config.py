@@ -70,7 +70,8 @@ def test_fingerprint_ignores_settings_that_do_not_change_results():
     {"loss_mode": "hinge"},
     {"siglip2_dense_readout": "cls"},
     {"prompt_modes": ["fixed", "nonsense"]},
-    {"prompt_modes": ["fixed"]},          # slide 23 needs fixed AND learned
+    {"prompt_modes": ["fixed"]},          # slide 23 needs a frozen mode AND learned
+    {"prompt_modes": ["learned"]},
     {"n_ctx": 0},
     {"map_res": 0},
     {"focal_smooth": 0.5},
@@ -79,3 +80,10 @@ def test_fingerprint_ignores_settings_that_do_not_change_results():
 def test_invalid_configuration_is_rejected(overrides):
     with pytest.raises(ValueError):
         make(**overrides)
+
+
+def test_any_frozen_mode_satisfies_the_protocol():
+    """Slide 23 asks for frozen and learnable, not for one specific vocabulary."""
+    for frozen in ("fixed", "fixed_agnostic", "fixed_compact"):
+        config = make(prompt_modes=[frozen, "learned"])
+        assert config.prompt_modes == (frozen, "learned")

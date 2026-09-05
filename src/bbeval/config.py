@@ -32,7 +32,11 @@ DEFAULT_DENSE_LAYER_FRACTIONS = {
     "clip": (0.25, 0.5, 0.75, 1.0),
     "siglip2": (1.0,),
 }
-VALID_PROMPT_MODES = ("fixed", "fixed_agnostic", "fixed_compact", "learned")
+# Frozen vocabularies, defined in prompts.py and mirrored here so the config can
+# validate without importing it. prompts.py asserts the two agree.
+FROZEN_PROMPT_MODES = ("fixed", "fixed_agnostic", "fixed_compact")
+LEARNED_PROMPT_MODE = "learned"
+VALID_PROMPT_MODES = FROZEN_PROMPT_MODES + (LEARNED_PROMPT_MODE,)
 
 
 @dataclass
@@ -166,9 +170,14 @@ class BackboneEvalConfig:
         unknown = set(self.prompt_modes) - set(VALID_PROMPT_MODES)
         if unknown:
             raise ValueError(f"unknown prompt mode(s): {sorted(unknown)}")
-        # pptx slide 23 asks for both fixed and learnable prompt performance.
-        if not {"fixed", "learned"} <= set(self.prompt_modes):
-            raise ValueError("prompt_modes must include both fixed and learned")
+        # pptx slide 23 asks for both frozen and learnable prompt performance,
+        # but any of the frozen vocabularies satisfies the frozen half.
+        if not set(self.prompt_modes) & set(FROZEN_PROMPT_MODES):
+            raise ValueError(
+                "prompt_modes must include at least one frozen mode from "
+                f"{FROZEN_PROMPT_MODES}")
+        if LEARNED_PROMPT_MODE not in self.prompt_modes:
+            raise ValueError(f"prompt_modes must include {LEARNED_PROMPT_MODE!r}")
         if self.input_size <= 0 or self.map_res <= 0:
             raise ValueError("input_size and map_res must be positive")
         if self.n_ctx <= 0:
