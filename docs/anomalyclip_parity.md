@@ -13,10 +13,10 @@ not specify now follows the official `zqhang/AnomalyCLIP` implementation.
 | object-agnostic prompts | yes | same |
 | deep text-prompt tuning | yes | **deliberately absent per Alireza** |
 | trainable shallow tensors | normal and abnormal contexts | same; encoders frozen and asserted |
-| visual stages | 6, 12, 18, 24 | same fractions for CLIP and SigLIP2 |
+| inference visual stages | 6, 12, 18, 24 | same for CLIP; final layer 24 for SigLIP2 |
 | CLIP dense visual path | DPAM V-V attention, starting at layer 6 | same functional dual path |
-| SigLIP2 dense visual path | not applicable | native `map_token` projection at the same four stages |
-| training objective | image CE + `4 × Σ_layers(focal + dice_abnormal + dice_normal)` | same |
+| SigLIP2 dense visual path | not applicable | native `map_token` projection at final layer 24 |
+| training objective | image CE + `4 × Σ_layers(focal + dice_abnormal + dice_normal)` | same loss terms; final layer only for both backbones |
 | similarity temperature | 0.07 | same |
 | inference anomaly map | softmax per layer, resize, sum layers | same |
 | image anomaly score | global abnormal-text probability only | same by default |
@@ -31,14 +31,19 @@ abnormal.
 
 ## Cross-backbone adaptation
 
-DPAM is specific to CLIP's transformer implementation. SigLIP2 has no literal
-DPAM module, so its patch tokens are projected through its own attention-pool
-head (`map_token`). Both backbones expose four proportional stages. This keeps
-the number of per-layer focal/Dice terms equal without forcing SigLIP2 through
-a CLIP-only projection.
+DPAM is specific to CLIP's transformer implementation. CLIP retains the
+official four-stage DPAM inference map. SigLIP2 has no literal DPAM module and
+its paper does not prescribe layers 6/12/18/24 for anomaly localisation, so it
+uses the final encoder output through its native attention-pool (`map_token`)
+projection.
+
+During shallow-prompt fitting, `pixel_loss_layers="last"` supervises only the
+final selected layer for both backbones. CLIP and SigLIP2 therefore receive one
+focal/Dice term each. `pixel_loss_layers="all"` restores AnomalyCLIP's
+four-layer CLIP training loss as an explicit ablation.
 
 The configuration field `use_value_attention` retains its historical name so
-old JSON configs still load. In version 0.7.0, `true` means the official
+old JSON configs still load. From version 0.7.0, `true` means the official
 AnomalyCLIP DPAM-style accumulating V-V dense branch. It no longer means the
 old independent one-block value projection.
 
@@ -70,8 +75,8 @@ explicit storage/runtime ablation and must be labelled accordingly.
 
 ## Reproducibility
 
-The package version is part of the configuration fingerprint. Version 0.7.0
-therefore cannot resume incompatible version-0.6.0 artifacts or prompt
+The package version is part of the configuration fingerprint. Version 0.8.0
+therefore cannot resume incompatible older artifacts or prompt
 checkpoints. Existing result directories remain historical records rather than
 being overwritten.
 

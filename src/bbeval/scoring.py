@@ -141,14 +141,17 @@ def training_logits(config: BackboneEvalConfig, backbone: Backbone, prompts,
                     images_uint8: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Image logits [B, 2] and per-layer pixel logits [L, B, 2, h, w].
 
-    Pixel logits are returned per layer, not averaged: AnomalyCLIP applies the
-    focal and dice terms to each layer's map and sums them, which supervises
-    every layer that is read instead of letting one compensate for another.
+    Pixel logits stay per-layer rather than being averaged. By default only the
+    final selected layer is returned, giving CLIP and final-layer SigLIP2 one
+    equally weighted local loss term. `pixel_loss_layers="all"` restores the
+    original AnomalyCLIP four-layer CLIP objective as an explicit ablation.
     """
     with torch.autocast("cuda", enabled=(config.amp and config.device == "cuda")):
         features = backbone.encode(backbone.preprocess(images_uint8))
     text = prompts()
     logit_scale = logit_scale_for(config, backbone)
+    pixel_logits = dense_logits_per_layer(features["dense"], text, logit_scale)
+    if config.pixel_loss_layers == "last":
+        pixel_logits = pixel_logits[-1:]
     return (global_logits(features, text, logit_scale, config,
-                          backbone.has_two_global_tokens),
-            dense_logits_per_layer(features["dense"], text, logit_scale))
+                          backbone.has_two_global_tokens), pixel_logits)

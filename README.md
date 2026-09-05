@@ -64,10 +64,11 @@ intact for the global image embedding. This is implemented functionally without
 adding or training parameters. The historical configuration name
 `use_value_attention=True` enables it.
 
-SigLIP2 has no literal DPAM module. Its patch tokens instead use the model's own
-attention-pool projection. Both backbones expose four proportional stages.
-`use_value_attention=False` remains the raw-CLIP control; the global embedding
-is identical and only dense localization features differ.
+SigLIP2 has no literal DPAM module. Its standard output comes from the final
+encoder state through the model's own attention-pool projection, so this
+benchmark reads SigLIP2 layer 24. `use_value_attention=False` remains the
+raw-CLIP control; the global embedding is identical and only dense localization
+features differ.
 
 ## The variable under test
 
@@ -296,10 +297,11 @@ AnomalyCLIP's objective:
 image_cross_entropy + lam * sum_over_layers(focal + dice_abnormal + dice_normal)
 ```
 
-with `lam = 4`, 15 epochs, and constant Adam lr 1e-3. The pixel terms are
-applied to **each of four proportional layers** and summed for both backbones.
-At inference, each layer is softmaxed and resized separately, then the four
-abnormal-probability maps are summed, matching official AnomalyCLIP ordering.
+with `lam = 4`, 15 epochs, and constant Adam lr 1e-3. Prompt fitting defaults
+to the **final layer only** for both backbones, so both receive one local loss
+term. CLIP retains AnomalyCLIP's four-stage DPAM inference map; SigLIP2 uses its
+standard final layer. `pixel_loss_layers="all"` is the explicit four-layer
+AnomalyCLIP training ablation.
 
 The explicit exception is deep prompt tuning inside the text transformer. DPAM
 is used for CLIP's frozen dense branch; SigLIP2 uses its own frozen

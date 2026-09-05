@@ -31,10 +31,10 @@ DEFAULT_GEOMETRIC_MAGNITUDES = {
 }
 DEFAULT_DENSE_LAYER_FRACTIONS = {
     "clip": (0.25, 0.5, 0.75, 1.0),
-    # AnomalyCLIP supervises and sums four equally spaced visual stages. Apply
-    # the same stage count to every 24-block backbone so the local objective is
-    # not four times stronger for CLIP than for SigLIP2.
-    "siglip2": (0.25, 0.5, 0.75, 1.0),
+    # SigLIP2's standard output is the final encoder state followed by its MAP
+    # attention-pooling head. Its paper does not prescribe AnomalyCLIP's four
+    # intermediate stages for anomaly localisation.
+    "siglip2": (1.0,),
 }
 # Frozen vocabularies, defined in prompts.py and mirrored here so the config can
 # validate without importing it. prompts.py asserts the two agree.
@@ -114,6 +114,10 @@ class BackboneEvalConfig:
     focal_smooth: float = 1e-5
     image_loss_weight: float = 1.0
     pixel_loss_weight: float = 4.0          # AnomalyCLIP's lam
+    # Keep CLIP's four-layer AnomalyCLIP inference map, but supervise only the
+    # final selected layer during shallow-prompt fitting. SigLIP2 already reads
+    # only its final layer, so both backbones receive one local loss term.
+    pixel_loss_layers: str = "last"
     # AnomalyCLIP's setting. Two epochs was not enough to leave the
     # "normal everywhere" basin the pixel loss starts in.
     epochs: int = 15
@@ -174,6 +178,10 @@ class BackboneEvalConfig:
         if self.loss_mode not in ("local", "global", "both"):
             raise ValueError(
                 f"loss_mode must be local, global or both; got {self.loss_mode!r}")
+        if self.pixel_loss_layers not in ("last", "all"):
+            raise ValueError(
+                "pixel_loss_layers must be last or all; got "
+                f"{self.pixel_loss_layers!r}")
         if self.siglip2_dense_readout not in ("map_token", "raw"):
             raise ValueError(
                 "siglip2_dense_readout must be map_token or raw; got "
@@ -258,6 +266,7 @@ class BackboneEvalConfig:
             "train_cap": self.max_train_images_per_category,
             "image_weight": self.image_loss_weight,
             "pixel_weight": self.pixel_loss_weight,
+            "pixel_loss_layers": self.pixel_loss_layers,
             "focal_gamma": self.focal_gamma,
             "focal_smooth": self.focal_smooth,
             "map_temperature": self.map_temperature,

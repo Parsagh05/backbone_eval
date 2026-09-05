@@ -38,7 +38,8 @@ def test_defaults_follow_anomalyclip_evaluation_protocol():
     assert config.gaussian_sigma == 4.0
     assert config.add_local_evidence is False
     assert config.dense_layer_fractions["clip"] == (0.25, 0.5, 0.75, 1.0)
-    assert config.dense_layer_fractions["siglip2"] == (0.25, 0.5, 0.75, 1.0)
+    assert config.dense_layer_fractions["siglip2"] == (1.0,)
+    assert config.pixel_loss_layers == "last"
 
 
 def test_fingerprint_tracks_settings_that_change_results():
@@ -59,6 +60,7 @@ def test_fingerprint_tracks_settings_that_change_results():
                           "anomalous": "damaged item."}).fingerprint()
     assert base.fingerprint() != make(focal_smooth=1e-4).fingerprint()
     assert base.fingerprint() != make(grad_clip=1.0).fingerprint()
+    assert base.fingerprint() != make(pixel_loss_layers="all").fingerprint()
 
 
 def test_fingerprint_includes_the_code_revision(monkeypatch):
@@ -84,6 +86,7 @@ def test_fingerprint_ignores_settings_that_do_not_change_results():
     {"map_res": 0},
     {"focal_smooth": 0.5},
     {"grad_clip": 0.0},
+    {"pixel_loss_layers": "mean"},
 ])
 def test_invalid_configuration_is_rejected(overrides):
     with pytest.raises(ValueError):

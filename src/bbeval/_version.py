@@ -5,4 +5,4 @@ changes scoring behaviour invalidates earlier artefacts instead of silently
 resuming on top of them. Bump it whenever a change alters results.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

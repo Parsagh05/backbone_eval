@@ -8,10 +8,10 @@
 
 > Versions through 0.6.0 are historical. Their image score added the maximum
 > pixel-map response to the global probability, their inference map softmaxed
-> averaged logits, and metrics used 64×64 maps. Version 0.7.0 corrects these to
-> official AnomalyCLIP evaluation behavior and also matches four dense stages
-> across CLIP and SigLIP2. Do not compare the older image/AUPRO numbers directly
-> with published AnomalyCLIP results.
+> averaged logits, and metrics used 64×64 maps. Version 0.7.0 corrected those
+> inference choices. Version 0.8.0 restores SigLIP2's standard final-layer
+> readout and uses only the final layer in both backbones' learned pixel loss.
+> Do not compare older image/AUPRO numbers directly with published AnomalyCLIP.
 
 ---
 
