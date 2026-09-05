@@ -285,9 +285,11 @@ also dropped a category-name mapping: `pcb1`-`pcb4` were `"printed circuit
 board"` and `macaroni1`/`macaroni2` were `"macaroni"`, and are now their raw
 category names.
 
-Select which modes to run with `prompt_modes`. Any frozen vocabulary satisfies
-the frozen half of slide 23, so `("fixed_compact", "learned")` is a valid run;
-only dropping *all* frozen modes, or `learned`, is rejected.
+Select which modes to run with `prompt_modes`. Shards are stored per mode and
+`resume` merges them, so a run may cover part of the protocol and a later run
+into the same `output_root` completes it. A frozen-only run therefore skips
+prompt fitting entirely — minutes instead of hours — and covering only one half
+warns rather than failing.
 
 The exact frozen vocabulary is pinned by `tests/test_prompts.py`.
 

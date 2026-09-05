@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -170,14 +171,23 @@ class BackboneEvalConfig:
         unknown = set(self.prompt_modes) - set(VALID_PROMPT_MODES)
         if unknown:
             raise ValueError(f"unknown prompt mode(s): {sorted(unknown)}")
+        if not self.prompt_modes:
+            raise ValueError("prompt_modes cannot be empty")
         # pptx slide 23 asks for both frozen and learnable prompt performance,
-        # but any of the frozen vocabularies satisfies the frozen half.
+        # but a single run may legitimately cover one half: shards are stored
+        # per mode, so a later run into the same output_root completes the pair,
+        # and a frozen-only run skips prompt fitting entirely. Warn, do not fail.
+        missing = []
         if not set(self.prompt_modes) & set(FROZEN_PROMPT_MODES):
-            raise ValueError(
-                "prompt_modes must include at least one frozen mode from "
-                f"{FROZEN_PROMPT_MODES}")
+            missing.append(f"a frozen mode from {FROZEN_PROMPT_MODES}")
         if LEARNED_PROMPT_MODE not in self.prompt_modes:
-            raise ValueError(f"prompt_modes must include {LEARNED_PROMPT_MODE!r}")
+            missing.append(repr(LEARNED_PROMPT_MODE))
+        if missing:
+            warnings.warn(
+                f"prompt_modes={self.prompt_modes} omits {' and '.join(missing)}; "
+                "slide 23 asks for both frozen and learnable results, so this "
+                "run covers only part of the protocol.",
+                stacklevel=2)
         if self.input_size <= 0 or self.map_res <= 0:
             raise ValueError("input_size and map_res must be positive")
         if self.n_ctx <= 0:
