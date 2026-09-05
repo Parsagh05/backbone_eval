@@ -28,7 +28,7 @@ def logit_scale_for(config: BackboneEvalConfig, backbone: Backbone) -> float:
     Defaults to AnomalyCLIP's 1/0.07 rather than the backbone's learned scale
     (CLIP 100, SigLIP2 ~108), which saturates the two-class softmax and flattens
     the focal gradient. Ranking metrics are invariant to it, but the training
-    signal and the score fusion `global + max(map)` are not.
+    signal is not. The optional score-fusion ablation is also scale-sensitive.
     """
     temperature = (config.map_temperature if config.map_temperature is not None
                    else backbone.temperature)
@@ -49,12 +49,6 @@ def dense_logits_per_layer(dense: Mapping[int, torch.Tensor], text: torch.Tensor
     return torch.stack(per_layer)
 
 
-def dense_logits(dense: Mapping[int, torch.Tensor], text: torch.Tensor,
-                 logit_scale: float) -> torch.Tensor:
-    """Patch-text logits, averaged over the selected blocks -> [B, 2, h, w]."""
-    return dense_logits_per_layer(dense, text, logit_scale).mean(dim=0)
-
-
 def global_logits(features: Mapping[str, Any], text: torch.Tensor,
                   logit_scale: float, config: BackboneEvalConfig,
                   has_two_tokens: bool) -> torch.Tensor:
@@ -64,24 +58,42 @@ def global_logits(features: Mapping[str, Any], text: torch.Tensor,
 
 
 def _gaussian_blur(maps: torch.Tensor, sigma: float) -> torch.Tensor:
+    """SciPy-compatible Gaussian smoothing used by AnomalyCLIP at inference."""
     if not sigma:
         return maps
-    radius = max(1, int(round(3 * sigma)))
+    # scipy.ndimage.gaussian_filter defaults to truncate=4.0. Reflect padding
+    # is its default boundary treatment; cap only for tiny synthetic test maps.
+    radius = max(1, int(4.0 * sigma + 0.5))
+    radius = min(radius, maps.shape[-2] - 1, maps.shape[-1] - 1)
     grid = torch.arange(-radius, radius + 1, device=maps.device, dtype=maps.dtype)
     kernel = torch.exp(-(grid ** 2) / (2 * sigma ** 2))
     kernel = kernel / kernel.sum()
-    maps = F.conv2d(maps, kernel.view(1, 1, 1, -1), padding=(0, radius))
-    return F.conv2d(maps, kernel.view(1, 1, -1, 1), padding=(radius, 0))
+    maps = F.pad(maps, (radius, radius, 0, 0), mode="reflect")
+    maps = F.conv2d(maps, kernel.view(1, 1, 1, -1))
+    maps = F.pad(maps, (0, 0, radius, radius), mode="reflect")
+    return F.conv2d(maps, kernel.view(1, 1, -1, 1))
 
 
 def to_anomaly_map(logits: torch.Tensor, config: BackboneEvalConfig,
                    map_res: int | None = None) -> torch.Tensor:
-    """Anomalous-class probability, upsampled to the stored map resolution."""
+    """AnomalyCLIP map: sum per-layer probabilities after spatial upsampling.
+
+    Accepts [L,B,2,h,w], or [B,2,h,w] for a single-layer control. Official
+    AnomalyCLIP softmaxes each layer separately, upsamples its probability map,
+    and sums the maps; averaging logits before softmax is not equivalent.
+    """
     size = map_res or config.map_res
-    probability = logits.softmax(dim=1)[:, 1:2]
-    probability = F.interpolate(probability, size=(size, size), mode="bilinear",
-                                align_corners=False)
-    return _gaussian_blur(probability, config.gaussian_sigma).clamp_(0.0, 1.0)[:, 0]
+    if logits.ndim == 4:
+        logits = logits[None]
+    if logits.ndim != 5:
+        raise ValueError(f"expected [L,B,2,h,w] logits, got {tuple(logits.shape)}")
+    layers, batch = logits.shape[:2]
+    probability = logits.softmax(dim=2)[:, :, 1:2]
+    probability = F.interpolate(
+        probability.reshape(layers * batch, 1, *probability.shape[-2:]),
+        size=(size, size), mode="bilinear", align_corners=False)
+    probability = probability.reshape(layers, batch, 1, size, size).sum(dim=0)
+    return _gaussian_blur(probability, config.gaussian_sigma)[:, 0]
 
 
 def peak_evidence(maps: torch.Tensor, config: BackboneEvalConfig) -> torch.Tensor:
@@ -109,7 +121,8 @@ def anomaly_outputs(config: BackboneEvalConfig, backbone: Backbone,
     maps, global_probability = {}, {}
     for key, text in texts.items():
         maps[key] = to_anomaly_map(
-            dense_logits(features["dense"], text, logit_scale), config, map_res)
+            dense_logits_per_layer(features["dense"], text, logit_scale),
+            config, map_res)
         global_probability[key] = global_logits(
             features, text, logit_scale, config,
             backbone.has_two_global_tokens).softmax(-1)[:, 1]

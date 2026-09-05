@@ -5,7 +5,7 @@
   "weights_dir": "/kaggle/working/weights",
 
   "backbones": ["clip", "siglip2"],
-  "prompt_modes": ["fixed_compact"],
+  "prompt_modes": ["fixed", "learned"],
 
   "clip_backbone": "ViT-L/14@336px",
   "siglip2_model": "hf-hub:timm/ViT-L-16-SigLIP2-384",
@@ -13,7 +13,13 @@
   "siglip2_input_size": null,
 
   "input_size": 518,
-  "map_res": 64,
+  "map_res": 518,
+  "dense_layer_fractions": {
+    "clip": [0.25, 0.5, 0.75, 1.0],
+    "siglip2": [0.25, 0.5, 0.75, 1.0]
+  },
+  "add_local_evidence": false,
+  "gaussian_sigma": 4.0,
   "n_ctx": 12,
   "loss_mode": "both",
   "epochs": 15,

@@ -50,45 +50,24 @@ Every adapted value comes from the model's own config or paper — never from
 tuning — and each is written into `run_manifest_<config_id>.json` next to the
 results, so a reader can audit the choices.
 
-## ⚠ Open decision — read before quoting any CLIP number
+## Dense visual readout
 
-**CLIP's dense features get an attention-surgery fix. SigLIP2 does not. This has
-not been signed off, and it changes the headline comparison.**
+**CLIP's dense features use AnomalyCLIP's DPAM V-V attention branch. SigLIP2
+uses its native attention-pool projection. This architecture-specific readout
+is recorded in every run manifest.**
 
-To draw a heatmap, every patch has to be comparable against text. CLIP has a
-documented defect here: read the obvious way, its heatmap points at the *wrong*
-places — below chance. The standard remedy, used by CLIP-Surgery and by
-AnomalyCLIP's DPAM, is to read each block through its value path instead. It
-adds no parameters and changes no weights. `use_value_attention=True` applies it
-to every CLIP dense layer.
+To draw a heatmap, every patch has to be comparable against text. CLIP's raw
+patch similarities can point at the wrong regions. AnomalyCLIP addresses this
+with DPAM: from layer 6 onward, a second residual stream accumulates V-V
+attention outputs and skips its FFNs while the ordinary CLIP path remains
+intact for the global image embedding. This is implemented functionally without
+adding or training parameters. The historical configuration name
+`use_value_attention=True` enables it.
 
-SigLIP2 needs nothing equivalent: its attention-pooling head produces usable
-patch features directly.
-
-The tension is that the protocol this track inherited states *"no attention
-layer is modified"*, and this modifies one — for one backbone only.
-
-| | Keep the fix (current) | Drop it |
-| --- | --- | --- |
-| CLIP fixed-prompt pixel AUROC | 53.0 MVTec | ~37, below chance |
-| Comparison means | CLIP measured near its real capability | SigLIP2 beats a broken baseline; worthless |
-| Protocol rule | needs rewording to "no *trainable* internal parameters" | literally true |
-
-**Recommendation:** keep it, and reword the rule to what is actually true —
-*no trainable internal parameters; each backbone gets the readout its own
-architecture requires*, which is the same principle the rest of this repository
-rests on. Then report that **CLIP needs the fix and SigLIP2 does not** as part
-of the result, because that asymmetry is itself a finding about the backbones.
-
-**Two things outstanding:**
-
-1. Run the ablation — CLIP only, `use_value_attention=False`, ~1.5 h. It is in
-   the config fingerprint so it will not collide. That turns "the fix is
-   harmless" from an assertion into a measured number, and pre-empts the
-   reviewer question about whether the baseline was crippled.
-2. **Ask Alireza.** He wrote the "not contaminating the target model's
-   architecture" line, so the call is his — but he should know that following it
-   literally puts CLIP below chance.
+SigLIP2 has no literal DPAM module. Its patch tokens instead use the model's own
+attention-pool projection. Both backbones expose four proportional stages.
+`use_value_attention=False` remains the raw-CLIP control; the global embedding
+is identical and only dense localization features differ.
 
 ## The variable under test
 
@@ -196,9 +175,11 @@ still being written. On Kaggle that is
 `/kaggle/working/backbone_eval_<config_id>.zip`, which shows up in the output
 panel as a single file to download. Set `archive_results=False` to skip it.
 
-Expect roughly **200-400 MB** for a clean two-backbone run: the maps dominate,
-at float16 and `map_res` 64 per image per prompt mode. The `.npz` shards are
-already compressed, so the ZIP is a container rather than a further squeeze.
+The AnomalyCLIP-compatible default stores 518×518 float16 maps. Budget several
+gigabytes for a clean two-backbone/four-mode run; exact compression depends on
+map smoothness. `map_res=64` is still available when storage is constrained,
+but it is a labelled low-resolution ablation and is not directly comparable to
+published AnomalyCLIP pixel metrics.
 
 ## Runtime
 
@@ -210,15 +191,19 @@ one clean pass over both protocol directions:
 | prompt fitting (15 epochs x both source splits) | ~58,300 |
 | evaluation sweep (MVTec 1,725 + VisA 2,162) | ~3,900 |
 
-All three prompt modes come out of one forward pass, so measuring `fixed`,
-`fixed_agnostic` and `learned` costs the same as measuring one.
+All configured prompt modes come out of one visual forward pass, so additional
+frozen modes add little inference time. Every additional learned mode still
+requires its own prompt-fitting passes.
 
 Calibrated against a measured run: **40 minutes** on a Kaggle T4 for both
 backbones at 2 epochs, of which roughly 5-7 was fixed cost (4.4 GB of weight
 downloads, then the AUPRO pass over 162 category x mode cells). Fifteen epochs
 is 5.3x the compute, so:
 
-**About 3 hours on a T4 — call it 2.5 to 3.5**, comfortably inside one session.
+The historical 64×64 run took about 3 hours on a T4. The 518×518 reference
+default leaves backbone-forward time similar but makes artifact I/O and the
+200-threshold AUPRO sweep substantially heavier; benchmark one category before
+assuming the old wall-clock estimate.
 
 Prompt fitting dominates: at 15 epochs it is about 58,000 forward passes per
 backbone against 3,900 for the evaluation sweep. Two levers if that does not fit
@@ -312,12 +297,13 @@ image_cross_entropy + lam * sum_over_layers(focal + dice_abnormal + dice_normal)
 ```
 
 with `lam = 4`, 15 epochs, and constant Adam lr 1e-3. The pixel terms are
-applied to **each layer's** map and summed, not to a layer-averaged map, so every
-layer that is read has to be discriminative on its own.
+applied to **each of four proportional layers** and summed for both backbones.
+At inference, each layer is softmaxed and resized separately, then the four
+abnormal-probability maps are summed, matching official AnomalyCLIP ordering.
 
-What is deliberately *not* taken from AnomalyCLIP: deep prompt tuning inside the
-text transformer, DPAM visual surgery, learnable visual tokens, and adapters on
-the intermediate features. Only the shallow context vectors train.
+The explicit exception is deep prompt tuning inside the text transformer. DPAM
+is used for CLIP's frozen dense branch; SigLIP2 uses its own frozen
+attention-pool readout. Only the two shallow context tensors train.
 
 Audited line by line against AnomalyCLIP's own `train.py`, `loss.py` and
 `prompt_ensemble.py`, and against the group's
@@ -332,8 +318,7 @@ see [docs/run_findings.md](docs/run_findings.md).
 
 Seed 111. Metrics: pixel AUROC / F1-max / AUPRO / threshold, image AUROC /
 F1-max / AP / threshold, plus ECE for the slide-24 calibration track.
-Low-resolution maps and raw scores are stored so any metric can be recomputed
-without GPU time.
+Maps and raw scores are stored so metrics can be recomputed without GPU time.
 
 ## Layout
 
@@ -392,7 +377,8 @@ The first measured run is written up in
 [docs/run_findings.md](docs/run_findings.md). In short:
 
 Two runs are recorded in [docs/run_findings.md](docs/run_findings.md).
-The current one is `cae0b9678540` (v0.5.0, full AnomalyCLIP parity):
+The latest recorded numbers are historical run `25497c2775b0` (v0.6.0).
+They predate the v0.7.0 inference-parity corrections described above:
 
 - **SigLIP2 localises without any training.** Fixed-prompt pixel AUROC 82.8
   (MVTec) and 80.2 (VisA), against 47.3 / 47.0 reported in Tipsomaly Table 9 —
@@ -405,7 +391,8 @@ The current one is `cae0b9678540` (v0.5.0, full AnomalyCLIP parity):
   AnomalyCLIP's published 95.5, while training only 12 context vectors and
   none of its internal adaptation.
 
-Caveat: pixel metrics are computed at `map_res = 64`, not the full 518, so they
-are not directly comparable to published numbers. The CSVs in `vendor/` remain
-transcriptions, not measurements — see
+Those recorded numbers are historical version-0.6.0 results at `map_res=64`
+with a fused image score. Version 0.7.0 changes the fingerprint and requires a
+new run before quoting AnomalyCLIP-compatible comparisons. The CSVs in
+`vendor/` remain transcriptions, not measurements — see
 [docs/provenance_note.md](docs/provenance_note.md).

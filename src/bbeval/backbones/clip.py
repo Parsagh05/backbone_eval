@@ -27,12 +27,31 @@ CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
 
 
-def _value_block(block, x: torch.Tensor) -> torch.Tensor:
-    """One CLIP residual block with attention replaced by its value path."""
+def _dpam_value_attention(block, x: torch.Tensor) -> torch.Tensor:
+    """Official AnomalyCLIP DPAM V-V attention output.
+
+    AnomalyCLIP copies a CLIP block's QKV/output weights into a dual-path
+    attention module, then replaces Q and K with V for its dense branch. This
+    functional form avoids mutating the frozen OpenAI CLIP model; the ordinary
+    block still computes the untouched global path.
+    """
     normed = block.ln_1(x)
     qkv = F.linear(normed, block.attn.in_proj_weight, block.attn.in_proj_bias)
-    x = x + block.attn.out_proj(qkv.chunk(3, dim=-1)[2])
-    return x + block.mlp(block.ln_2(x))
+    value = qkv.chunk(3, dim=-1)[2]
+    length, batch, width = value.shape
+    heads = block.attn.num_heads
+    head_dim = width // heads
+    scale = head_dim ** -0.5
+
+    def split(tensor: torch.Tensor) -> torch.Tensor:
+        return (tensor.permute(1, 0, 2)
+                .reshape(batch, length, heads, head_dim)
+                .permute(0, 2, 1, 3))
+
+    value = split(value)
+    weights = ((value * scale) @ value.transpose(-2, -1)).softmax(dim=-1)
+    output = (weights @ value).permute(0, 2, 1, 3).reshape(batch, length, width)
+    return block.attn.out_proj(output.permute(1, 0, 2))
 
 
 class ClipBackbone(Backbone):
@@ -72,15 +91,19 @@ class ClipBackbone(Backbone):
         if native == self.grid:
             return pos
         patch_pos = patch_pos.reshape(1, native, native, -1).permute(0, 3, 1, 2)
+        # AnomalyCLIP's visual path uses bilinear positional interpolation.
         patch_pos = F.interpolate(patch_pos, size=(self.grid, self.grid),
-                                  mode="bicubic", align_corners=False)
+                                  mode="bilinear", align_corners=False)
         patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(self.grid ** 2, -1)
         return torch.cat([class_pos, patch_pos], dim=0)
 
     def describe(self) -> dict[str, Any]:
         return {**super().describe(),
                 "model_id": self.config.clip_backbone,
-                "dense_readout": "ln_post_proj",
+                "dense_readout": ("anomalyclip_dpam" if self.config.use_value_attention
+                                  else "raw_ln_post_proj"),
+                "dpam_start_layer": (max(1, self.depth - 18)
+                                     if self.config.use_value_attention else None),
                 "value_attention": self.config.use_value_attention}
 
     # --- vision --------------------------------------------------------------
@@ -107,18 +130,23 @@ class ClipBackbone(Backbone):
         hidden = visual.ln_pre(tokens).permute(1, 0, 2)      # NLD -> LND
 
         dense = {}
+        dpam = None
+        # Official DAPM_replace(20) replaces the final 19 blocks: layer 6
+        # onward for the 24-block ViT-L/14 used by AnomalyCLIP.
+        dpam_start = max(1, self.depth - 18)
         for depth, block in enumerate(visual.transformer.resblocks, start=1):
             previous = hidden
             hidden = block(hidden)
+            if self.config.use_value_attention and depth >= dpam_start:
+                value_attention = _dpam_value_attention(block, previous)
+                # Official ViT-L DPAM starts a second residual stream at its
+                # first selected stage (layer 6), accumulates V-V attention,
+                # and deliberately skips the dense branch's FFNs.
+                dpam = ((previous if dpam is None else dpam) + value_attention)
+                source = dpam
+            else:
+                source = hidden
             if depth in self.layers:
-                # Raw CLIP patch-text cosine is anti-correlated with the object
-                # -- the "opposite visualisation" that CLIP-Surgery describes --
-                # so the value path is taken at *every* layer that is read, not
-                # only the last. Mixing raw layers into the average drags the
-                # map below chance. The main forward keeps the ordinary block
-                # output, so the global embedding is untouched.
-                source = (_value_block(block, previous)
-                          if self.config.use_value_attention else hidden)
                 dense[depth] = self._project(source.permute(1, 0, 2)[:, 1:])
         global_embedding = self._project(hidden.permute(1, 0, 2)[:, :1])[:, 0]
 

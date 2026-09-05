@@ -1,4 +1,4 @@
-"""Storage for low-resolution anomaly maps, scores and ground truth (pptx slide 21).
+"""Storage for anomaly maps, scores and ground truth (pptx slide 21).
 
 Maps and raw scores are stored so metrics can be recomputed without re-running
 inference -- a different metric or aggregation should never require GPU time,

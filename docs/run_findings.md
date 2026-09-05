@@ -3,7 +3,15 @@
 | Run | Version | What it was |
 | --- | --- | --- |
 | `1f2fb45b459e` | 0.1.0 | first measured run; three defects found in it |
-| `cae0b9678540` | 0.5.0 | after the fixes, full AnomalyCLIP parity |
+| `cae0b9678540` | 0.5.0 | training-loss parity under legacy inference |
+| `25497c2775b0` | 0.6.0 | exact prompts; legacy fused image score and 64px maps |
+
+> Versions through 0.6.0 are historical. Their image score added the maximum
+> pixel-map response to the global probability, their inference map softmaxed
+> averaged logits, and metrics used 64×64 maps. Version 0.7.0 corrects these to
+> official AnomalyCLIP evaluation behavior and also matches four dense stages
+> across CLIP and SigLIP2. Do not compare the older image/AUPRO numbers directly
+> with published AnomalyCLIP results.
 
 ---
 

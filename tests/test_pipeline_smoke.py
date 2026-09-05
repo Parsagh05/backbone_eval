@@ -62,7 +62,10 @@ class StubBackbone(Backbone):
         # so metrics are not degenerate.
         batch = x.shape[0]
         pooled = torch.nn.functional.adaptive_avg_pool2d(x, self.grid)
-        tokens = pooled.permute(0, 2, 3, 1).reshape(batch, self.grid * self.grid, 3)
+        intensity = pooled.mean(dim=1, keepdim=True)
+        features = torch.cat([intensity, 1.0 - intensity, pooled[:, :1]], dim=1)
+        tokens = features.permute(0, 2, 3, 1).reshape(
+            batch, self.grid * self.grid, 3)
         dense = torch.nn.functional.pad(tokens, (0, EMBED - 3))
         dense = dense.reshape(batch, self.grid, self.grid, EMBED)
         return {"object": dense.mean(dim=(1, 2)),
@@ -77,7 +80,10 @@ class StubBackbone(Backbone):
         return ctx.mean(dim=1) @ self._project        # differentiable in ctx
 
     def encode_fixed_text(self, texts):
-        generator = torch.Generator().manual_seed(len(texts))
+        # Include content as well as count: compact normal/abnormal ensembles
+        # have equal lengths and must not collapse to identical toy prototypes.
+        seed = sum(ord(character) for text in texts for character in text)
+        generator = torch.Generator().manual_seed(seed)
         return torch.randn(len(texts), EMBED, generator=generator)
 
 
@@ -100,11 +106,20 @@ def _write_mask(path):
     Image.fromarray(array).save(path)
 
 
+def _write_defect_png(path):
+    from PIL import Image
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    array = np.full((IMAGE_SIZE, IMAGE_SIZE, 3), 40, dtype=np.uint8)
+    array[8:24, 8:24] = 200
+    Image.fromarray(array).save(path)
+
+
 def build_mvtec(root, category="widget"):
     for index in range(N_NORMAL):
         _write_png(os.path.join(root, category, "test", "good", f"{index:03d}.png"), 40)
     for index in range(N_DEFECT):
-        _write_png(os.path.join(root, category, "test", "broken", f"{index:03d}.png"), 200)
+        _write_defect_png(
+            os.path.join(root, category, "test", "broken", f"{index:03d}.png"))
         _write_mask(os.path.join(root, category, "ground_truth", "broken",
                                  f"{index:03d}_mask.png"))
 
@@ -119,7 +134,7 @@ def build_visa(root, category="gizmo"):
     for index in range(N_DEFECT):
         rel = f"{category}/Data/Images/Anomaly/{index:04d}.JPG"
         mask_rel = f"{category}/Data/Masks/Anomaly/{index:04d}.png"
-        _write_png(os.path.join(root, rel), 200)
+        _write_defect_png(os.path.join(root, rel))
         _write_mask(os.path.join(root, mask_rel))
         rows.append({"object": category, "split": "test", "label": "bad",
                      "image": rel, "mask": mask_rel})
@@ -142,6 +157,7 @@ def config(tmp_path_factory) -> BackboneEvalConfig:
         mvtec_root=mvtec, visa_root=visa, output_root=str(root / "out"),
         backbones=("stub",), categories={"mvtec": ("widget",), "visa": ("gizmo",)},
         input_size=IMAGE_SIZE, map_res=8, n_ctx=4, epochs=1, batch_size=2,
+        gaussian_sigma=0.0,
         corruptions_enabled=False, device="cpu", amp=False, num_workers=0,
         dense_layer_fractions={"stub": (1.0,)}, aupro_thresholds=16)
 

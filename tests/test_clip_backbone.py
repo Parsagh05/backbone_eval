@@ -48,12 +48,11 @@ def backbones(tmp_path_factory):
     return build(True), build(False)
 
 
-def test_value_surgery_reaches_every_selected_layer(backbones):
+def test_dpam_reaches_every_selected_layer(backbones):
     """Raw CLIP patch-text cosine is anti-correlated with the object.
 
-    Patching only the last layer and averaging raw layers in alongside it drove
-    the map below chance in 14 of 27 categories, so every layer that is read
-    must take the value path.
+    The DPAM side branch starts at the first selected stage and accumulates
+    V-V attention through every later selected stage.
     """
     surgery, plain = backbones
     image = torch.randn(2, 3, surgery.image_size, surgery.image_size)

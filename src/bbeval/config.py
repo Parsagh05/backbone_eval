@@ -31,7 +31,10 @@ DEFAULT_GEOMETRIC_MAGNITUDES = {
 }
 DEFAULT_DENSE_LAYER_FRACTIONS = {
     "clip": (0.25, 0.5, 0.75, 1.0),
-    "siglip2": (1.0,),
+    # AnomalyCLIP supervises and sums four equally spaced visual stages. Apply
+    # the same stage count to every 24-block backbone so the local objective is
+    # not four times stronger for CLIP than for SigLIP2.
+    "siglip2": (0.25, 0.5, 0.75, 1.0),
 }
 # Frozen vocabularies, defined in prompts.py and mirrored here so the config can
 # validate without importing it. prompts.py asserts the two agree.
@@ -68,23 +71,30 @@ class BackboneEvalConfig:
 
     # --- visual / scoring ----------------------------------------------------
     input_size: int = 518
-    map_res: int = 64
+    # Official AnomalyCLIP evaluates its maps at the configured 518px image
+    # resolution. Lower values remain available as explicit storage/runtime
+    # ablations, but are not the reference default.
+    map_res: int = 518
     dense_layer_fractions: dict[str, tuple[float, ...]] = field(
         default_factory=lambda: dict(DEFAULT_DENSE_LAYER_FRACTIONS))
     shared_dense_layers: tuple[float, ...] | None = None
+    # Historical name retained for config compatibility. True now selects the
+    # official AnomalyCLIP DPAM dense branch (V-V attention from layer 6), not
+    # the former one-block value projection approximation.
     use_value_attention: bool = True
     global_token: str = "spatial"
-    add_local_evidence: bool = True
-    gaussian_sigma: float = 1.0
+    # AnomalyCLIP's image metric uses the global abnormal-text probability only.
+    # Local fusion is retained solely as an explicit experimental ablation.
+    add_local_evidence: bool = False
+    gaussian_sigma: float = 4.0
     topk_fraction: float = 0.0
 
     # --- prompts -------------------------------------------------------------
     n_ctx: int = 12                          # AnomalyCLIP's default
     # AnomalyCLIP scales both image and patch similarities by 1/0.07 rather than
     # by the backbone's learned logit scale, and so does the group's own
-    # object-agnostic-prompt-training. A shared value also puts both backbones'
-    # maps on the same sharpness, which matters because the image score adds
-    # max(map) to a probability. None -> use each backbone's learned scale.
+    # object-agnostic-prompt-training. A shared value also gives both backbones
+    # the same training-softmax sharpness. None uses each learned scale.
     map_temperature: float | None = 0.07
     # AnomalyCLIP initialises context vectors from N(0, 0.02), not from the
     # embeddings of the "X" placeholder tokens.

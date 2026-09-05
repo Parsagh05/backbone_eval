@@ -32,6 +32,15 @@ def test_derived_paths_hang_off_output_root():
     assert config.dataset_roots == {"mvtec": "/data/mvtec", "visa": "/data/visa"}
 
 
+def test_defaults_follow_anomalyclip_evaluation_protocol():
+    config = make()
+    assert config.map_res == config.input_size == 518
+    assert config.gaussian_sigma == 4.0
+    assert config.add_local_evidence is False
+    assert config.dense_layer_fractions["clip"] == (0.25, 0.5, 0.75, 1.0)
+    assert config.dense_layer_fractions["siglip2"] == (0.25, 0.5, 0.75, 1.0)
+
+
 def test_fingerprint_tracks_settings_that_change_results():
     base = make()
     assert base.fingerprint() == make().fingerprint()
