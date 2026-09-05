@@ -15,7 +15,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("clip")
 
-from bbeval.backbones.clip import ClipBackbone  # noqa: E402
+from bbeval.backbones.clip import ClipBackbone, StandardClipBackbone  # noqa: E402
 from bbeval.config import BackboneEvalConfig  # noqa: E402
 
 MODEL = "ViT-B/32"
@@ -36,16 +36,17 @@ def weights_dir() -> str:
 def backbones(tmp_path_factory):
     cache = weights_dir()
 
-    def build(value_attention: bool) -> ClipBackbone:
-        return ClipBackbone(BackboneEvalConfig(
+    def build(value_attention: bool, factory=ClipBackbone) -> ClipBackbone:
+        return factory(BackboneEvalConfig(
             mvtec_root="x", visa_root="y",
             output_root=str(tmp_path_factory.mktemp("clip")),
             weights_dir=cache, device="cpu", clip_backbone=MODEL,
             input_size=224, n_ctx=8, amp=False,
             use_value_attention=value_attention,
-            dense_layer_fractions={"clip": LAYERS}))
+            dense_layer_fractions={"clip": LAYERS,
+                                   "clip_standard": (1.0,)}))
 
-    return build(True), build(False)
+    return build(True), build(False), build(True, StandardClipBackbone)
 
 
 def test_dpam_reaches_every_selected_layer(backbones):
@@ -54,7 +55,7 @@ def test_dpam_reaches_every_selected_layer(backbones):
     The DPAM side branch starts at the first selected stage and accumulates
     V-V attention through every later selected stage.
     """
-    surgery, plain = backbones
+    surgery, plain = backbones[:2]
     image = torch.randn(2, 3, surgery.image_size, surgery.image_size)
     with torch.no_grad():
         patched, raw = surgery.encode(image), plain.encode(image)
@@ -67,7 +68,7 @@ def test_dpam_reaches_every_selected_layer(backbones):
 
 def test_surgery_leaves_the_global_embedding_untouched(backbones):
     """The side branch must not disturb the image-level score."""
-    surgery, plain = backbones
+    surgery, plain = backbones[:2]
     image = torch.randn(2, 3, surgery.image_size, surgery.image_size)
     with torch.no_grad():
         patched, raw = surgery.encode(image), plain.encode(image)
@@ -75,7 +76,7 @@ def test_surgery_leaves_the_global_embedding_untouched(backbones):
 
 
 def test_global_embedding_matches_clips_own_encode_image(backbones):
-    surgery, _ = backbones
+    surgery = backbones[0]
     image = torch.randn(2, 3, surgery.image_size, surgery.image_size)
     with torch.no_grad():
         mine = surgery.encode(surgery.preprocess(
@@ -83,3 +84,21 @@ def test_global_embedding_matches_clips_own_encode_image(backbones):
         reference = surgery.model.encode_image(surgery.preprocess(
             (image.clamp(-1, 1) * 127 + 128).to(torch.uint8)))
     assert (mine - reference).abs().max().item() == 0.0
+
+
+def test_standard_clip_is_a_final_layer_non_dpam_control(backbones):
+    surgery, plain, standard = backbones
+    assert standard.layers == (standard.depth,)
+    assert standard.use_dpam is False
+
+    image = torch.randn(2, 3, standard.image_size, standard.image_size)
+    with torch.no_grad():
+        dpam_features = surgery.encode(image)
+        plain_features = plain.encode(image)
+        standard_features = standard.encode(image)
+
+    final = standard.depth
+    assert torch.equal(standard_features["dense"][final],
+                       plain_features["dense"][final])
+    assert torch.equal(standard_features["object"],
+                       dpam_features["object"])

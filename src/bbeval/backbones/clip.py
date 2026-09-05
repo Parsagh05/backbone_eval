@@ -22,6 +22,7 @@ try:
 except Exception as _clip_error:  # noqa: BLE001
     clip = None
     skip_backbone("clip", _clip_error)
+    skip_backbone("clip_standard", _clip_error)
 
 CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
@@ -57,6 +58,7 @@ def _dpam_value_attention(block, x: torch.Tensor) -> torch.Tensor:
 class ClipBackbone(Backbone):
     name = "clip"
     has_two_global_tokens = False
+    allows_dpam = True
 
     def __init__(self, config: BackboneEvalConfig) -> None:
         if clip is None:
@@ -76,6 +78,9 @@ class ClipBackbone(Backbone):
         self.embed_dim = self.model.text_projection.shape[1]
         self.depth = len(self.visual.transformer.resblocks)
         self.layers = resolve_dense_layers(config, self.name, self.depth)
+        # `clip_standard` is a hard control: a global configuration flag must
+        # never accidentally turn its dense path into DPAM.
+        self.use_dpam = self.allows_dpam and config.use_value_attention
         self.temperature = float(1.0 / self.model.logit_scale.exp().item())
         self.num_params = sum(p.numel() for p in self.model.parameters())
 
@@ -100,11 +105,11 @@ class ClipBackbone(Backbone):
     def describe(self) -> dict[str, Any]:
         return {**super().describe(),
                 "model_id": self.config.clip_backbone,
-                "dense_readout": ("anomalyclip_dpam" if self.config.use_value_attention
-                                  else "raw_ln_post_proj"),
+                "dense_readout": ("anomalyclip_dpam" if self.use_dpam
+                                  else "standard_ln_post_proj"),
                 "dpam_start_layer": (max(1, self.depth - 18)
-                                     if self.config.use_value_attention else None),
-                "value_attention": self.config.use_value_attention}
+                                     if self.use_dpam else None),
+                "value_attention": self.use_dpam}
 
     # --- vision --------------------------------------------------------------
     def preprocess(self, images_uint8: torch.Tensor) -> torch.Tensor:
@@ -137,7 +142,7 @@ class ClipBackbone(Backbone):
         for depth, block in enumerate(visual.transformer.resblocks, start=1):
             previous = hidden
             hidden = block(hidden)
-            if self.config.use_value_attention and depth >= dpam_start:
+            if self.use_dpam and depth >= dpam_start:
                 value_attention = _dpam_value_attention(block, previous)
                 # Official ViT-L DPAM starts a second residual stream at its
                 # first selected stage (layer 6), accumulates V-V attention,
@@ -198,5 +203,13 @@ class ClipBackbone(Backbone):
                                   tokenized.argmax(dim=-1))
 
 
+class StandardClipBackbone(ClipBackbone):
+    """Vanilla final-layer CLIP control with no AnomalyCLIP DPAM branch."""
+
+    name = "clip_standard"
+    allows_dpam = False
+
+
 if clip is not None:
     register_backbone("clip")(ClipBackbone)
+    register_backbone("clip_standard")(StandardClipBackbone)

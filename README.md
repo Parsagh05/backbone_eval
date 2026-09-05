@@ -52,9 +52,16 @@ results, so a reader can audit the choices.
 
 ## Dense visual readout
 
-**CLIP's dense features use AnomalyCLIP's DPAM V-V attention branch. SigLIP2
-uses its native attention-pool projection. This architecture-specific readout
-is recorded in every run manifest.**
+Three named backbones make the visual-path difference explicit:
+
+- `clip` uses AnomalyCLIP's DPAM V-V branch and sums maps from layers
+  6, 12, 18 and 24.
+- `clip_standard` is the control: ordinary CLIP self-attention, standard
+  `ln_post @ visual.proj` patch projection, and layer 24 only. It cannot enable
+  DPAM even when `use_value_attention=true` globally.
+- `siglip2` uses its native attention-pool projection at layer 24.
+
+The selected readout and layers are recorded in every run manifest.
 
 To draw a heatmap, every patch has to be comparable against text. CLIP's raw
 patch similarities can point at the wrong regions. AnomalyCLIP addresses this
@@ -66,9 +73,8 @@ adding or training parameters. The historical configuration name
 
 SigLIP2 has no literal DPAM module. Its standard output comes from the final
 encoder state through the model's own attention-pool projection, so this
-benchmark reads SigLIP2 layer 24. `use_value_attention=False` remains the
-raw-CLIP control; the global embedding is identical and only dense localization
-features differ.
+benchmark reads SigLIP2 layer 24. The global embedding is identical between
+`clip` and `clip_standard`; only their dense localization path differs.
 
 ## The variable under test
 
@@ -107,7 +113,8 @@ from bbeval import BackboneEvalConfig, run_evaluation
 
 result = run_evaluation(BackboneEvalConfig(
     mvtec_root=..., visa_root=..., output_root=...,
-    backbones=("clip", "siglip2"), siglip2_dense_readout="map_token",
+    backbones=("clip", "clip_standard", "siglip2"),
+    siglip2_dense_readout="map_token",
 ))
 ```
 
@@ -176,11 +183,9 @@ still being written. On Kaggle that is
 `/kaggle/working/backbone_eval_<config_id>.zip`, which shows up in the output
 panel as a single file to download. Set `archive_results=False` to skip it.
 
-The AnomalyCLIP-compatible default stores 518×518 float16 maps. Budget several
-gigabytes for a clean two-backbone/four-mode run; exact compression depends on
-map smoothness. `map_res=64` is still available when storage is constrained,
-but it is a labelled low-resolution ablation and is not directly comparable to
-published AnomalyCLIP pixel metrics.
+The default evaluates at 518×518 and stores maps at 64×64. Every shard records
+both `metrics_map_res` and `stored_map_res`, so low-resolution persistence cannot
+be mistaken for low-resolution scoring.
 
 ## Runtime
 
@@ -207,8 +212,10 @@ default leaves backbone-forward time similar but makes artifact I/O and the
 assuming the old wall-clock estimate.
 
 Prompt fitting dominates: at 15 epochs it is about 58,000 forward passes per
-backbone against 3,900 for the evaluation sweep. Two levers if that does not fit
-a session:
+backbone against 3,900 for the evaluation sweep. Enabling `clip_standard` adds
+one full CLIP prompt-fitting/evaluation run; it is a separate learned-prompt
+control, not an extra output from the DPAM forward pass. Two levers if that does
+not fit a session:
 
 - `resume=True` (the default) — prompt checkpoints are written per
   (backbone, source) and shards per cell, so a run continues across sessions.
@@ -331,7 +338,7 @@ src/bbeval/
   corruptions.py  deterministic slide-18/19 corruptions (optional dependency)
   backbones/      registry + the frozen-encoder interface
     base.py       the contract, and what each backbone must declare
-    clip.py       OpenAI CLIP
+    clip.py       DPAM CLIP + standard final-layer CLIP control
     siglip2.py    SigLIP2 via OpenCLIP/timm
   prompts.py      fixed ensembles + the learnable context
   scoring.py      patch/text logits, anomaly maps, image scores

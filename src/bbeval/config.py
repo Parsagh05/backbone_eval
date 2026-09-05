@@ -31,6 +31,9 @@ DEFAULT_GEOMETRIC_MAGNITUDES = {
 }
 DEFAULT_DENSE_LAYER_FRACTIONS = {
     "clip": (0.25, 0.5, 0.75, 1.0),
+    # Vanilla CLIP control: ordinary transformer output, final block only.
+    # This deliberately excludes AnomalyCLIP's DPAM branch and four-stage sum.
+    "clip_standard": (1.0,),
     # SigLIP2's standard output is the final encoder state followed by its MAP
     # attention-pooling head. Its paper does not prescribe AnomalyCLIP's four
     # intermediate stages for anomaly localisation.
@@ -52,7 +55,7 @@ class BackboneEvalConfig:
     weights_dir: str | None = None
 
     # --- what to run ---------------------------------------------------------
-    backbones: tuple[str, ...] = ("clip", "siglip2")
+    backbones: tuple[str, ...] = ("clip", "clip_standard", "siglip2")
     protocol: tuple[tuple[str, str], ...] = DEFAULT_PROTOCOL
     categories: dict[str, tuple[str, ...]] | None = None
     prompt_modes: tuple[str, ...] = (
