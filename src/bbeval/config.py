@@ -75,6 +75,12 @@ class BackboneEvalConfig:
     # resolution. Lower values remain available as explicit storage/runtime
     # ablations, but are not the reference default.
     map_res: int = 518
+    # Resolution the maps are *stored* at, which slide 21 asks to keep low.
+    # Metrics are computed during the sweep at `map_res`, so storage can be much
+    # smaller: 518 costs 16.7 GB of maps against 0.25 GB at 64, and Kaggle's
+    # working directory holds 20 GB including the archive written beside it.
+    # None stores at `map_res`.
+    store_map_res: int | None = 64
     dense_layer_fractions: dict[str, tuple[float, ...]] = field(
         default_factory=lambda: dict(DEFAULT_DENSE_LAYER_FRACTIONS))
     shared_dense_layers: tuple[float, ...] | None = None
@@ -208,6 +214,12 @@ class BackboneEvalConfig:
                 stacklevel=2)
         if self.input_size <= 0 or self.map_res <= 0:
             raise ValueError("input_size and map_res must be positive")
+        if self.store_map_res is not None:
+            if self.store_map_res <= 0:
+                raise ValueError("store_map_res must be positive or None")
+            # Storage cannot add detail, so asking for more than was computed is
+            # capped rather than refused: a small-map_res run stays valid.
+            self.store_map_res = min(self.store_map_res, self.map_res)
         if self.n_ctx <= 0:
             raise ValueError("n_ctx must be positive")
         if self.map_temperature is not None and self.map_temperature <= 0:

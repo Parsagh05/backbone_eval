@@ -27,13 +27,20 @@ def collect_category_table(config: BackboneEvalConfig,
                         if shard is None:
                             missing += 1
                             continue
-                        masks, _ = load_ground_truth(config, evaluate_on, category,
-                                                     corruption, severity)
-                        metrics = evaluate_shard(
-                            masks, shard["maps"], shard["labels"], shard["scores"],
-                            max_fpr=config.aupro_fpr_limit,
-                            num_thresholds=config.aupro_thresholds,
-                            ece_bins=config.ece_bins)
+                        # Metrics computed during the sweep at the full map
+                        # resolution; stored maps may be downsampled, so they
+                        # cannot reproduce these. Older shards carry none.
+                        metrics = shard["meta"].get("metrics")
+                        if metrics is None:
+                            masks, _ = load_ground_truth(config, evaluate_on,
+                                                         category, corruption,
+                                                         severity)
+                            metrics = evaluate_shard(
+                                masks, shard["maps"], shard["labels"],
+                                shard["scores"],
+                                max_fpr=config.aupro_fpr_limit,
+                                num_thresholds=config.aupro_thresholds,
+                                ece_bins=config.ece_bins)
                         rows.append({"backbone": backbone_name, "prompt_mode": mode,
                                      "source": source, "dataset": evaluate_on,
                                      "category": category, "corruption": corruption,

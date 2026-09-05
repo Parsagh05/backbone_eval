@@ -17,6 +17,7 @@ from .config import BackboneEvalConfig
 from .corruptions import corruption_grid
 from .datasets import categories_for, make_loader
 from .determinism import seed_everything
+from .metrics import evaluate_shard, resize_maps, resize_masks
 from .prompts import FIXED_MODES, build_fixed_text
 from .scoring import anomaly_outputs
 from .training import train_prompts
@@ -75,13 +76,26 @@ def run_shard(config: BackboneEvalConfig, backbone: Backbone, texts, dataset: st
                       "maps": np.concatenate(store["maps"]),
                       "labels": labels}
                for mode, store in collected.items()}
+
+    # Scored here, at the full map resolution, because storage downsamples and
+    # the detail cannot be recovered afterwards.
+    for payload in results.values():
+        payload["metrics"] = evaluate_shard(
+            masks, payload["maps"], labels, payload["scores"],
+            max_fpr=config.aupro_fpr_limit,
+            num_thresholds=config.aupro_thresholds,
+            ece_bins=config.ece_bins)
     if not save:
         return results, masks
 
-    save_ground_truth(config, dataset, category, corruption, severity, masks, labels)
+    store_res = config.store_map_res or config.map_res
+    save_ground_truth(config, dataset, category, corruption, severity,
+                      resize_masks(masks, store_res), labels)
     for mode, payload in results.items():
         save_shard(config, backbone, mode, dataset, category, corruption, severity,
-                   payload["scores"], payload["maps"], labels)
+                   payload["scores"],
+                   resize_maps(payload["maps"], store_res).astype(np.float16),
+                   labels, payload["metrics"])
     return results, masks
 
 

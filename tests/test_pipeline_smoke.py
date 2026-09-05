@@ -322,7 +322,9 @@ def test_run_shard_without_saving_returns_named_arrays(config):
     # Only "fixed" text was supplied, so the learned-prompt modes are skipped.
     assert set(outputs) == {"fixed"}
     shard = outputs["fixed"]
-    assert set(shard) == {"scores", "maps", "labels"}
+    # "metrics" is scored inside run_shard, at map_res, before storage downsamples.
+    assert set(shard) == {"scores", "maps", "labels", "metrics"}
+    assert set(ALL_METRICS) <= set(shard["metrics"])
     assert shard["scores"].shape == (N_NORMAL + N_DEFECT,)
     assert shard["maps"].shape == (N_NORMAL + N_DEFECT, config.map_res, config.map_res)
     assert masks.shape == shard["maps"].shape
@@ -371,3 +373,40 @@ def test_resume_skips_completed_shards(config):
     before = mtimes()
     run_sweep(config, backbones=load_backbones(config), verbose=False)
     assert mtimes() == before
+
+
+def test_metrics_come_from_the_full_resolution_maps(config):
+    """Storage downsamples; scoring must not.
+
+    Metrics are computed during the sweep at `map_res` and carried in the shard,
+    because a stored low-resolution map cannot reproduce them.
+    """
+    from dataclasses import replace
+
+    from bbeval.artifacts import load_shard
+    from bbeval.engine import run_evaluation
+
+    hi = replace(config, map_res=16, store_map_res=4,
+                 output_root=config.output_root + "_hires", archive_results=False)
+    run_evaluation(hi, verbose=False)
+
+    shard = load_shard(hi, "stub", "fixed", "mvtec", "widget", "clean", 0)
+    assert shard["maps"].shape[-1] == 4, "maps must be stored downsampled"
+    assert shard["meta"]["map_res"] == 16
+    assert shard["meta"]["store_map_res"] == 4
+    stored = shard["meta"]["metrics"]
+    assert set(ALL_METRICS) <= set(stored)
+
+    # The table must use those, not recompute from the 4x4 maps.
+    table = collect_category_table(hi, verbose=False)
+    row = table[(table.backbone == "stub") & (table.prompt_mode == "fixed")
+                & (table.dataset == "mvtec")].iloc[0]
+    for metric in ALL_METRICS:
+        assert row[metric] == pytest.approx(stored[metric])
+
+
+def test_store_map_res_is_capped_at_map_res(config):
+    """Storage cannot add detail, so an over-large request is capped, not refused."""
+    from dataclasses import replace
+    assert replace(config, map_res=8, store_map_res=64).store_map_res == 8
+    assert replace(config, map_res=64, store_map_res=16).store_map_res == 16

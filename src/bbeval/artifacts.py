@@ -58,16 +58,22 @@ def load_ground_truth(config: BackboneEvalConfig, dataset: str, category: str,
 
 def save_shard(config: BackboneEvalConfig, backbone, prompt_mode: str, dataset: str,
                category: str, corruption: str, severity: int, scores: np.ndarray,
-               maps: np.ndarray, labels: np.ndarray) -> str:
+               maps: np.ndarray, labels: np.ndarray,
+               metrics: dict | None = None) -> str:
+    """Store one cell. `maps` may be downsampled; `metrics` are the full-resolution
+    values, computed during the sweep because storage cannot recover them."""
     path = shard_path(config, backbone.name, prompt_mode, dataset, category,
                       corruption, severity)
     meta = {
         "prompt_mode": prompt_mode, "dataset": dataset, "category": category,
         "corruption": corruption, "severity": int(severity),
         "input_size": config.input_size, "map_res": config.map_res,
+        "store_map_res": maps.shape[-1],
         "seed": config.seed, "config_id": config.fingerprint(),
         **backbone.describe(),
     }
+    if metrics is not None:
+        meta["metrics"] = {key: float(value) for key, value in metrics.items()}
     np.savez_compressed(path, scores=scores, maps=maps, labels=labels,
                         meta=json.dumps(meta))
     return path

@@ -136,6 +136,23 @@ def evaluate_shard(masks, maps, labels, scores, with_aupro: bool = True,
     return result
 
 
+def resize_masks(masks, size: int) -> np.ndarray:
+    """Area-downsample binary masks, keeping defects too small to survive it.
+
+    Used only for *storage*: metrics are computed against the full-resolution
+    masks during the sweep.
+    """
+    if masks.shape[-1] == size:
+        return np.asarray(masks, dtype=np.uint8)
+    tensor = torch.from_numpy(np.asarray(masks, dtype=np.float32))[:, None]
+    reduced = F.interpolate(tensor, size=(size, size), mode="area") > 0.5
+    empty = reduced.flatten(1).any(dim=1).logical_not() & tensor.flatten(1).any(dim=1)
+    if empty.any():
+        rescued = F.adaptive_max_pool2d(tensor[empty], size) > 0
+        reduced[empty] = rescued
+    return reduced[:, 0].numpy().astype(np.uint8)
+
+
 def resize_maps(maps, size: int) -> np.ndarray:
     """Bilinear resampling of stored low-res maps, for higher-resolution scoring."""
     if maps.shape[-1] == size:
