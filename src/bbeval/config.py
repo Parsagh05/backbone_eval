@@ -257,6 +257,9 @@ class BackboneEvalConfig:
             "seed": self.seed,
             "input": self.input_size,
             "map_res": self.map_res,
+            # Storage resolution changes the persisted artefacts and must not
+            # silently resume from shards written at another resolution.
+            "store_map_res": self.store_map_res,
             "backbones": list(self.backbones),
             "clip": self.clip_backbone,
             "siglip2": self.siglip2_model,

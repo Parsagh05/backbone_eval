@@ -61,6 +61,7 @@ def test_fingerprint_tracks_settings_that_change_results():
     assert base.fingerprint() != make(focal_smooth=1e-4).fingerprint()
     assert base.fingerprint() != make(grad_clip=1.0).fingerprint()
     assert base.fingerprint() != make(pixel_loss_layers="all").fingerprint()
+    assert base.fingerprint() != make(store_map_res=32).fingerprint()
 
 
 def test_fingerprint_includes_the_code_revision(monkeypatch):

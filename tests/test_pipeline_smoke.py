@@ -394,6 +394,8 @@ def test_metrics_come_from_the_full_resolution_maps(config):
     assert shard["maps"].shape[-1] == 4, "maps must be stored downsampled"
     assert shard["meta"]["map_res"] == 16
     assert shard["meta"]["store_map_res"] == 4
+    assert shard["meta"]["metrics_map_res"] == 16
+    assert shard["meta"]["stored_map_res"] == 4
     stored = shard["meta"]["metrics"]
     assert set(ALL_METRICS) <= set(stored)
 

@@ -69,6 +69,10 @@ def save_shard(config: BackboneEvalConfig, backbone, prompt_mode: str, dataset: 
         "corruption": corruption, "severity": int(severity),
         "input_size": config.input_size, "map_res": config.map_res,
         "store_map_res": maps.shape[-1],
+        # Keep scoring and persistence resolution unambiguous. The older keys
+        # above remain for compatibility with existing analysis scripts.
+        "metrics_map_res": config.map_res,
+        "stored_map_res": maps.shape[-1],
         "seed": config.seed, "config_id": config.fingerprint(),
         **backbone.describe(),
     }
