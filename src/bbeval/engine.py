@@ -17,7 +17,7 @@ from .config import BackboneEvalConfig
 from .corruptions import corruption_grid
 from .datasets import categories_for, make_loader
 from .determinism import seed_everything
-from .prompts import AGNOSTIC_CLASS_NAME, build_fixed_text
+from .prompts import FIXED_MODES, build_fixed_text
 from .scoring import anomaly_outputs
 from .training import train_prompts
 
@@ -99,14 +99,14 @@ def run_sweep(config: BackboneEvalConfig, backbones: dict[str, Backbone] | None 
             source: train_prompts(config, backbone, source, verbose)().detach()
             for source, _ in config.protocol}
 
-        # The class-agnostic ensemble never mentions the category, so it is the
-        # same for every one of them: build it once per backbone.
-        agnostic_text = (
-            build_fixed_text(config, backbone, AGNOSTIC_CLASS_NAME,
-                             class_name=AGNOSTIC_CLASS_NAME)
-            if "fixed_agnostic" in config.prompt_modes else None)
+        frozen = [mode for mode in config.prompt_modes if mode in FIXED_MODES]
+        # A class-agnostic ensemble never mentions the category, so it is the
+        # same for all of them: build those once per backbone.
+        static_text = {mode: build_fixed_text(config, backbone, "", mode=mode)
+                       for mode in frozen if FIXED_MODES[mode][1] is not None}
+        per_category = [mode for mode in frozen if FIXED_MODES[mode][1] is None]
 
-        current_key, fixed_text = None, None
+        current_key, category_text = None, {}
         for item in plan:
             done += 1
             if config.resume and config.limit is None and shard_is_done(
@@ -116,12 +116,14 @@ def run_sweep(config: BackboneEvalConfig, backbones: dict[str, Backbone] | None 
 
             key = (name, item["dataset"], item["category"])
             if key != current_key:
-                fixed_text = build_fixed_text(config, backbone, item["category"])
+                category_text = {
+                    mode: build_fixed_text(config, backbone, item["category"],
+                                           mode=mode)
+                    for mode in per_category}
                 current_key = key
 
-            texts = {"fixed": fixed_text, "learned": learned_text[item["source"]]}
-            if agnostic_text is not None:
-                texts["fixed_agnostic"] = agnostic_text
+            texts = {**static_text, **category_text,
+                     "learned": learned_text[item["source"]]}
             run_shard(config, backbone, texts, item["dataset"], item["category"],
                       item["corruption"], item["severity"],
                       save=(config.limit is None))

@@ -21,12 +21,6 @@ import torch.nn.functional as F
 from .backbones import Backbone
 from .config import BackboneEvalConfig
 
-PAIRS = {
-    "fixed": ("fixed", "fixed"),
-    "fixed_agnostic": ("fixed_agnostic", "fixed_agnostic"),
-    "learned": ("learned", "learned"),
-}
-
 
 def logit_scale_for(config: BackboneEvalConfig, backbone: Backbone) -> float:
     """The scale applied to every cosine, for training and inference alike.
@@ -105,8 +99,8 @@ def anomaly_outputs(config: BackboneEvalConfig, backbone: Backbone,
                     map_res: int | None = None) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
     """{mode: (scores [B], maps [B,M,M])} for every configured prompt mode.
 
-    Both modes come out of a single visual forward pass, so measuring two
-    costs almost nothing over measuring one.
+    Every mode comes out of a single visual forward pass, so measuring all of
+    them costs almost nothing over measuring one.
     """
     logit_scale = logit_scale_for(config, backbone)
     with torch.autocast("cuda", enabled=(config.amp and config.device == "cuda")):
@@ -120,15 +114,14 @@ def anomaly_outputs(config: BackboneEvalConfig, backbone: Backbone,
             features, text, logit_scale, config,
             backbone.has_two_global_tokens).softmax(-1)[:, 1]
 
-    def score(global_key: str, map_key: str) -> torch.Tensor:
-        value = global_probability[global_key]
+    def score(mode: str) -> torch.Tensor:
+        value = global_probability[mode]
         if config.add_local_evidence:
-            return value + peak_evidence(maps[map_key], config)
+            return value + peak_evidence(maps[mode], config)
         return value
 
-    return {mode: (score(*PAIRS[mode]).float(), maps[PAIRS[mode][1]].float())
-            for mode in config.prompt_modes
-            if all(key in texts for key in PAIRS[mode])}
+    return {mode: (score(mode).float(), maps[mode].float())
+            for mode in config.prompt_modes if mode in texts}
 
 
 def training_logits(config: BackboneEvalConfig, backbone: Backbone, prompts,

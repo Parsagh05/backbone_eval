@@ -5,7 +5,7 @@
   "weights_dir": "/kaggle/working/weights",
 
   "backbones": ["clip", "siglip2"],
-  "prompt_modes": ["fixed", "fixed_agnostic", "learned"],
+  "prompt_modes": ["fixed", "fixed_agnostic", "fixed_compact", "learned"],
 
   "clip_backbone": "ViT-L/14@336px",
   "siglip2_model": "hf-hub:timm/ViT-L-16-SigLIP2-384",

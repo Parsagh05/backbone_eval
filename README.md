@@ -267,11 +267,19 @@ re-checks this before every fit.
 
 Three prompt modes come out of one visual forward pass:
 
-| Mode | Text | Category name |
-| --- | --- | --- |
-| `fixed` | WinCLIP's 22-template x (7 normal, 4 anomalous) ensemble | **yes** — `"a cropped photo of the hazelnut."` |
-| `fixed_agnostic` | the same ensemble | **no** — `"a cropped photo of the object."` |
-| `learned` | 12 trained context vectors + fixed suffix | **no** |
+| Mode | Ensemble | Category name | Prompts/category |
+| --- | --- | --- | --- |
+| `fixed` | WinCLIP: 22 templates x (7 normal, 4 anomalous) | **yes** — `"a cropped photo of the hazelnut."` | 154 + 88 |
+| `fixed_agnostic` | the same | **no** — `"a cropped photo of the object."` | 154 + 88 |
+| `fixed_compact` | 7 templates x (6, 6) | **yes** — `"a photo of a hazelnut."` | 42 + 42 |
+| `learned` | 12 trained context vectors + fixed suffix | **no** | 2 |
+
+The three frozen modes vary one thing each, so each pair isolates a factor:
+`fixed` vs `fixed_agnostic` measures what the **category name** is worth, and
+`fixed` vs `fixed_compact` measures what the **ensemble size** is worth.
+`fixed_compact` is the vocabulary used up to run `cae0b9678540`; retaining it
+attributes the jump that followed (CLIP +8.7 pixel AUROC, SigLIP2 +0.8) to the
+ensemble rather than to the other changes in the same commit.
 
 The exact frozen vocabulary is pinned by `tests/test_prompts.py`.
 

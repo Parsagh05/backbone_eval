@@ -120,3 +120,47 @@ def test_agnostic_and_class_aware_variants_differ():
     assert agnostic[0][0] == "a cropped photo of the object."
     # Same ensemble size either way: only the label changes.
     assert [len(x) for x in aware] == [len(x) for x in agnostic]
+
+
+def test_compact_ensemble_is_the_pre_winclip_vocabulary():
+    """`fixed_compact` preserves the list used up to run cae0b9678540.
+
+    Keeping it lets the jump that followed be attributed to the ensemble rather
+    than to the other changes that landed in the same commit.
+    """
+    from bbeval.prompts import COMPACT_ENSEMBLE
+
+    assert COMPACT_ENSEMBLE.templates == (
+        "a photo of a {}.",
+        "a cropped photo of a {}.",
+        "a close-up photo of a {}.",
+        "a bright photo of a {}.",
+        "a dark photo of a {}.",
+        "a blurry photo of a {}.",
+        "a photo of a {} for visual inspection.",
+    )
+    assert COMPACT_ENSEMBLE.normal == (
+        "{}", "flawless {}", "perfect {}", "unblemished {}",
+        "{} without defect", "{} without damage")
+    assert COMPACT_ENSEMBLE.anomalous == (
+        "damaged {}", "flawed {}", "{} with defect",
+        "{} with damage", "{} with flaw", "broken {}")
+
+
+def test_frozen_modes_differ_only_where_intended():
+    from bbeval.prompts import FIXED_MODES
+
+    config = make_config()
+    sizes = {mode: [len(part) for part in fixed_prompt_texts(config, "hazelnut", mode)]
+             for mode in FIXED_MODES}
+    # WinCLIP: 22 templates x 7 normal / 4 anomalous. Compact: 7 x 6 / 6.
+    assert sizes["fixed"] == [154, 88]
+    assert sizes["fixed_agnostic"] == [154, 88]
+    assert sizes["fixed_compact"] == [42, 42]
+    # fixed vs fixed_agnostic: same ensemble, different label.
+    assert sizes["fixed"] == sizes["fixed_agnostic"]
+    # fixed vs fixed_compact: same label, different ensemble.
+    assert (fixed_prompt_texts(config, "hazelnut", "fixed")[0][0]
+            .endswith("hazelnut."))
+    assert (fixed_prompt_texts(config, "hazelnut", "fixed_compact")[0][0]
+            .endswith("hazelnut."))
