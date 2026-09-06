@@ -16,8 +16,8 @@ VISA_INPUT = "/kaggle/input/datasets/alirezasalehy/visa-ad/VisA_20220922"
 OUTPUT_ROOT = "/kaggle/working/results"
 WEIGHTS_DIR = "/kaggle/working/weights"
 
-BACKBONES = ("clip_standard", "siglip2_grid37")
-PROMPT_MODES = ("fixed", "learned")
+BACKBONES = ("clip_standard",)
+PROMPT_MODES = ("fixed_agnostic",)
 SIGLIP2_DENSE_READOUT = "map_token"   # "raw" reproduces the published control
 CORRUPTIONS_ENABLED = False           # clean-only for the backbone comparison
 LIMIT = None                          # e.g. 8 for a smoke test

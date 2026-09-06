@@ -375,6 +375,29 @@ def test_resume_skips_completed_shards(config):
     assert mtimes() == before
 
 
+def test_frozen_only_sweep_skips_prompt_training(config, monkeypatch):
+    """A fixed_agnostic-only reproduction must not spend 15 epochs training."""
+    from dataclasses import replace
+
+    import bbeval.engine as engine
+
+    with pytest.warns(UserWarning, match="learned"):
+        frozen = replace(
+            config, prompt_modes=("fixed_agnostic",), resume=False,
+            archive_results=False, output_root=config.output_root + "_frozen")
+
+    def unexpected_training(*args, **kwargs):
+        raise AssertionError("frozen-only sweep attempted prompt training")
+
+    monkeypatch.setattr(engine, "train_prompts", unexpected_training)
+    engine.run_sweep(
+        frozen, backbones=engine.load_backbones(frozen), verbose=False)
+
+    shard = load_shard(
+        frozen, "stub", "fixed_agnostic", "mvtec", "widget", "clean", 0)
+    assert shard is not None
+
+
 def test_metrics_come_from_the_full_resolution_maps(config):
     """Storage downsamples; scoring must not.
 

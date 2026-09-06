@@ -13,7 +13,7 @@ from .aggregate import (build_dataset_table, build_robustness_table,
 from .artifacts import (archive_output, save_ground_truth, save_shard,
                         shard_is_done, write_run_manifest)
 from .backbones import Backbone, backbone_errors, create_backbone
-from .config import BackboneEvalConfig
+from .config import BackboneEvalConfig, LEARNED_PROMPT_MODE
 from .corruptions import corruption_grid
 from .datasets import categories_for, make_loader
 from .determinism import seed_everything
@@ -109,9 +109,10 @@ def run_sweep(config: BackboneEvalConfig, backbones: dict[str, Backbone] | None 
 
     for name, backbone in backbones.items():
         # One prompt set per source dataset; each is used only on the other one.
-        learned_text = {
+        learned_text = ({
             source: train_prompts(config, backbone, source, verbose)().detach()
             for source, _ in config.protocol}
+            if LEARNED_PROMPT_MODE in config.prompt_modes else {})
 
         frozen = [mode for mode in config.prompt_modes if mode in FIXED_MODES]
         # A class-agnostic ensemble never mentions the category, so it is the
@@ -137,8 +138,9 @@ def run_sweep(config: BackboneEvalConfig, backbones: dict[str, Backbone] | None 
                     for mode in per_category}
                 current_key = key
 
-            texts = {**static_text, **category_text,
-                     "learned": learned_text[item["source"]]}
+            texts = {**static_text, **category_text}
+            if LEARNED_PROMPT_MODE in config.prompt_modes:
+                texts[LEARNED_PROMPT_MODE] = learned_text[item["source"]]
             run_shard(config, backbone, texts, item["dataset"], item["category"],
                       item["corruption"], item["severity"],
                       save=(config.limit is None))

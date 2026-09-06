@@ -4,8 +4,8 @@
   "output_root": "/kaggle/working/results",
   "weights_dir": "/kaggle/working/weights",
 
-  "backbones": ["clip_standard", "siglip2_grid37"],
-  "prompt_modes": ["fixed", "learned"],
+  "backbones": ["clip_standard"],
+  "prompt_modes": ["fixed_agnostic"],
 
   "clip_backbone": "ViT-L/14@336px",
   "siglip2_model": "hf-hub:timm/ViT-L-16-SigLIP2-384",
@@ -15,8 +15,7 @@
   "input_size": 518,
   "map_res": 518,
   "dense_layer_fractions": {
-    "clip_standard": [1.0],
-    "siglip2_grid37": [1.0]
+    "clip_standard": [1.0]
   },
   "add_local_evidence": false,
   "gaussian_sigma": 4.0,
